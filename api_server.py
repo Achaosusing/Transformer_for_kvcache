@@ -73,6 +73,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="If set, this server instance always evaluates with one method.",
     )
+    parser.add_argument("--streaming-sink-size", type=int, default=4)
+    parser.add_argument("--streaming-local-window-size", type=int, default=256)
+    parser.add_argument("--h2o-sink-size", type=int, default=4)
+    parser.add_argument("--h2o-local-window-size", type=int, default=256)
+    parser.add_argument("--h2o-heavy-hitter-size", type=int, default=128)
     return parser
 
 
@@ -80,6 +85,18 @@ def main() -> None:
     args = build_parser().parse_args()
     fixed_method = args.method
     served_model_name = args.served_model_name or args.model_path.rstrip("/").split("/")[-1]
+    fixed_method_configs: dict[str, dict[str, Any]] = {}
+    if fixed_method in ("streamingllm", "streaming_llm"):
+        fixed_method_configs[fixed_method] = {
+            "sink_size": args.streaming_sink_size,
+            "local_window_size": args.streaming_local_window_size,
+        }
+    elif fixed_method == "h2o":
+        fixed_method_configs[fixed_method] = {
+            "sink_size": args.h2o_sink_size,
+            "local_window_size": args.h2o_local_window_size,
+            "heavy_hitter_size": args.h2o_heavy_hitter_size,
+        }
 
     evaluator = OracleKVProjectAPI(
         model_path=args.model_path,
@@ -99,10 +116,13 @@ def main() -> None:
     @app.post("/v1/evaluate")
     def evaluate(req: EvalRequest) -> dict[str, Any]:
         methods = [fixed_method] if fixed_method else (req.methods or ["baseline", "streamingllm", "h2o"])
+        req_method_configs = req.method_configs or {}
+        if fixed_method and fixed_method_configs and fixed_method not in req_method_configs:
+            req_method_configs = {**req_method_configs, **fixed_method_configs}
         return evaluator.evaluate(
             samples=req.samples,
             methods=methods,
-            method_configs=req.method_configs,
+            method_configs=req_method_configs,
             max_new_tokens=req.max_new_tokens,
             temperature=req.temperature,
             top_p=req.top_p,
@@ -132,6 +152,9 @@ def main() -> None:
             raise HTTPException(status_code=400, detail="stream=true is not supported yet")
 
         methods = [fixed_method] if fixed_method else (req.methods or ["baseline"])
+        req_method_configs = req.method_configs or {}
+        if fixed_method and fixed_method_configs and fixed_method not in req_method_configs:
+            req_method_configs = {**req_method_configs, **fixed_method_configs}
         sample = {
             "id": "chat_0",
             "messages": [m.model_dump() for m in req.messages],
@@ -139,7 +162,7 @@ def main() -> None:
         result = evaluator.evaluate(
             samples=[sample],
             methods=methods,
-            method_configs=req.method_configs,
+            method_configs=req_method_configs,
             max_new_tokens=req.max_tokens,
             temperature=req.temperature,
             top_p=req.top_p,
@@ -190,6 +213,9 @@ def main() -> None:
             raise HTTPException(status_code=400, detail="stream=true is not supported yet")
 
         methods = [fixed_method] if fixed_method else (req.methods or ["baseline"])
+        req_method_configs = req.method_configs or {}
+        if fixed_method and fixed_method_configs and fixed_method not in req_method_configs:
+            req_method_configs = {**req_method_configs, **fixed_method_configs}
         sample = {
             "id": "completion_0",
             "prompt": req.prompt,
@@ -197,7 +223,7 @@ def main() -> None:
         result = evaluator.evaluate(
             samples=[sample],
             methods=methods,
-            method_configs=req.method_configs,
+            method_configs=req_method_configs,
             max_new_tokens=req.max_tokens,
             temperature=req.temperature,
             top_p=req.top_p,
