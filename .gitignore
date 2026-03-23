@@ -1,0 +1,6 @@
+local_models/
+data/
+__pycache__/
+.ipynb_checkpoints/
+*.pyc
+tau2-bench/

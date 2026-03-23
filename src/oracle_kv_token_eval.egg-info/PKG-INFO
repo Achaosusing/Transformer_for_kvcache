@@ -1,0 +1,157 @@
+Metadata-Version: 2.4
+Name: oracle-kv-token-eval
+Version: 0.1.0
+Summary: Token-level oracle StreamingLLM/H2O simulator for local Transformer models
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: torch>=2.2.0
+Requires-Dist: transformers>=4.45.0
+Requires-Dist: numpy>=1.24.0
+Requires-Dist: fastapi>=0.115.0
+Requires-Dist: uvicorn>=0.30.0
+
+# my_transformer_project (Oracle KV Evaluation)
+
+本项目按你要求的结构重写，并将 `baseline(full attention)`、`streamingLLM`、`h2o` 三种算法彻底拆分为独立模块，支持本地模型推理与 API 封装。
+
+## 目录结构
+
+```text
+oracle_kv_token_eval/
+├── configs/
+│   └── base_config.yaml
+├── data/
+│   ├── raw/
+│   └── processed/
+├── local_models/
+│   └── README.md
+├── src/
+│   ├── __init__.py
+│   ├── api.py
+│   ├── data_loader.py
+│   ├── model.py
+│   ├── trainer.py
+│   ├── utils.py
+│   └── methods/
+│       ├── __init__.py
+│       ├── base.py
+│       ├── baseline.py
+│       ├── streaming_llm.py
+│       └── h2o.py
+├── checkpoints/
+├── outputs/
+├── train.py
+├── inference.py
+├── api_server.py
+├── requirements.txt
+└── README.md
+```
+
+## 三种算法拆分位置
+
+- baseline: `src/methods/baseline.py`
+- streamingLLM: `src/methods/streaming_llm.py`
+- h2o: `src/methods/h2o.py`
+
+## 安装
+
+```bash
+pip install -r requirements.txt
+```
+
+## 本地模型放置
+
+把模型目录放在 `local_models/` 下，例如：
+
+```text
+local_models/
+  Qwen2.5-7B-Instruct/
+    config.json
+    model.safetensors
+    tokenizer.json
+    tokenizer_config.json
+```
+
+然后在 `configs/base_config.yaml` 里设置：
+
+```yaml
+model:
+  model_path: ./local_models/Qwen2.5-7B-Instruct
+```
+
+## 评测入口（分开评测三算法）
+
+```bash
+python inference.py --config configs/base_config.yaml
+```
+
+输出会保存到 `outputs/eval_results.jsonl`，并按 method 字段区分三种算法结果。
+
+## Python API
+
+`src/api.py` 中提供统一接口 `OracleKVProjectAPI`。
+
+```python
+from api import OracleKVProjectAPI
+
+api = OracleKVProjectAPI(
+    model_path="./local_models/Qwen2.5-7B-Instruct",
+    device="cuda",
+)
+
+samples = [
+    {"id": "1", "instruction": "..."},
+    {"id": "2", "messages": [{"role": "user", "content": "..."}]},
+]
+
+resp = api.evaluate(
+    samples=samples,
+    methods=["baseline", "streamingllm", "h2o"],
+    method_configs={
+        "streamingllm": {"sink_size": 4, "local_window_size": 256},
+        "h2o": {
+            "sink_size": 4,
+            "local_window_size": 256,
+            "heavy_hitter_ratio": 0.2,
+            "min_heavy_tokens": 1,
+        },
+    },
+)
+
+baseline = resp["results_by_method"]["baseline"]
+streaming = resp["results_by_method"]["streamingllm"]
+h2o = resp["results_by_method"]["h2o"]
+```
+
+## HTTP API
+
+启动：
+
+```bash
+python api_server.py --model-path ./local_models/Qwen2.5-7B-Instruct --device cuda
+```
+
+请求：
+
+```bash
+curl -X POST http://127.0.0.1:8000/v1/evaluate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "samples": [{"id": "task_1", "instruction": "..."}],
+    "methods": ["baseline", "streamingllm", "h2o"],
+    "method_configs": {
+      "streamingllm": {"sink_size": 4, "local_window_size": 256},
+      "h2o": {
+        "sink_size": 4,
+        "local_window_size": 256,
+        "heavy_hitter_ratio": 0.2,
+        "min_heavy_tokens": 1
+      }
+    }
+  }'
+```
+
+## 训练入口说明
+
+`train.py` 与 `src/trainer.py` 已保留为标准项目骨架入口。
+当前版本聚焦推理评测，因此训练逻辑为占位实现，后续可按你任务继续扩展。
