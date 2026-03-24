@@ -135,7 +135,7 @@ api = OracleKVProjectAPI(
 
 - baseline: 使用手写逐步缓存解码，KV cache 不裁剪。
 - streamingLLM: 使用手写逐步缓存解码；在进入生成前保留 Sink Tokens + Recent Tokens，在生成过程中持续以滑动窗口方式裁剪 cache，cache 大小保持在 `sink_size + local_window_size` 以内。
-- h2o: 以 streamingLLM 为基础，额外维护 Heavy Hitters。每个缓存 token 有一个 score 计数器，按每步解码时的注意力权重累计更新；当缓存超过预算时，仅在非 sink、非 recent 的普通 token 中淘汰累计得分最低者。
+- h2o: 以 streamingLLM 思想为基础，额外维护 Heavy Hitters。实现上会先对 full prompt 做一次带 attention 的 prefill，基于真实 attention 分数完成首次 h2o 裁剪；之后每个缓存 token 维护 score 计数器并按步累积注意力权重。当缓存超过预算时，仅在非 sink、非 recent 的普通 token 中淘汰累计得分最低者。
 
 ## 离线推理
 

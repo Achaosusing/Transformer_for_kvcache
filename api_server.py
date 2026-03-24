@@ -78,7 +78,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--h2o-sink-size", type=int, default=4)
     parser.add_argument("--h2o-local-window-size", type=int, default=256)
     parser.add_argument("--h2o-heavy-hitter-size", type=int, default=128)
-    parser.add_argument("--max-new-tokens", type=int, default=1024)
+    parser.add_argument("--max-new-tokens", type=int, default=512)
+    parser.add_argument(
+        "--evict-period", type=int, default=1,
+        help="Batch eviction period: prune cache every N tokens instead of every token. "
+             "1=exact per-token eviction (default). Higher values reduce pruning overhead.",
+    )
     return parser
 
 
@@ -126,6 +131,7 @@ def main() -> None:
             methods=methods,
             method_configs=req_method_configs,
             max_new_tokens=max_new_tokens,
+            evict_period=args.evict_period,
             temperature=req.temperature,
             top_p=req.top_p,
             stop_on_eos=req.stop_on_eos,
@@ -167,6 +173,7 @@ def main() -> None:
             methods=methods,
             method_configs=req_method_configs,
             max_new_tokens=max_new_tokens,
+            evict_period=args.evict_period,
             temperature=req.temperature,
             top_p=req.top_p,
             stop_on_eos=True,
@@ -229,6 +236,7 @@ def main() -> None:
             methods=methods,
             method_configs=req_method_configs,
             max_new_tokens=max_new_tokens,
+            evict_period=args.evict_period,
             temperature=req.temperature,
             top_p=req.top_p,
             stop_on_eos=True,

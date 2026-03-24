@@ -4,29 +4,22 @@ set -euo pipefail
 # Stress test: sweep H2O heavy-hitter sizes with fixed window.
 # Baseline and StreamingLLM serve as lower/upper bounds for comparison.
 #
-# Note: heavy=512 is excluded. With the current default AGENT_MAX_TOKENS=512,
-# a cache budget of sink+window+512=644 is already close enough to the
-# no-pruning regime that the compression contrast becomes much less informative.
-#
-# Parameter grid (default, window fixed at WINDOW_SIZE=128):
-#   baseline:    1 config  (no budget)
-#   streamingllm:1 config  (heavy=0 reference, budget = sink+window)
-#   h2o:         4 configs (heavy = 32, 64, 128, 256)
-#
-# Total: 6 configurations across 2 phases (up to 3 GPUs each).
+# This variant keeps Phase 1 on GPUs A/B/C and moves Phase 2 to GPUs D/E/F
+# (default: 5, 6, 7).
 #
 # Usage:
-#   bash scripts/run_tau2_stress_test.sh              # run all phases
-#   PHASE=1 bash scripts/run_tau2_stress_test.sh      # baseline + streamingllm + h2o(heavy=64) core
-#   PHASE=2 bash scripts/run_tau2_stress_test.sh      # h2o heavy sweep: 32, 128, 256
+#   bash scripts/run_tau2_stress_test_phase2_gpu567.sh
+#   PHASE=1 bash scripts/run_tau2_stress_test_phase2_gpu567.sh
+#   PHASE=2 bash scripts/run_tau2_stress_test_phase2_gpu567.sh
 #
 # Key overrides:
-#   WINDOW_SIZE=1024 PHASE=1 bash scripts/run_tau2_stress_test.sh
+#   GPU_A=2 GPU_B=3 GPU_C=4 GPU_D=5 GPU_E=6 GPU_F=7 \
+#   WINDOW_SIZE=1024 PHASE=2 bash scripts/run_tau2_stress_test_phase2_gpu567.sh
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-# ── Shared settings ─────────────────────────────────────────────────────────
+# Shared settings
 MODEL_PATH="${MODEL_PATH:-./local_models/Qwen3.5-9B}"
 DOMAIN="${DOMAIN:-airline}"
 TASK_SPLIT="${TASK_SPLIT:-base}"
@@ -42,20 +35,23 @@ NUM_TASKS="${NUM_TASKS:-30}"
 AGENT_MAX_TOKENS="${AGENT_MAX_TOKENS:-256}"
 EVICT_PERIOD="${EVICT_PERIOD:-16}"
 SINK_SIZE="${SINK_SIZE:-4}"
-WINDOW_SIZE="${WINDOW_SIZE:-512}" 
+WINDOW_SIZE="${WINDOW_SIZE:-512}"
 GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.9}"
 DEVICE="${DEVICE:-cuda}"
 DTYPE="${DTYPE:-auto}"
 PHASE="${PHASE:-0}"  # 0=all, 1/2=specific phase
 
-# GPU assignments (override as needed)
+# Phase 1 GPU assignments
 GPU_A="${GPU_A:-2}"
 GPU_B="${GPU_B:-3}"
 GPU_C="${GPU_C:-4}"
 
+# Phase 2 GPU assignments (moved to another 3 GPUs)
+GPU_D="${GPU_D:-5}"
+GPU_E="${GPU_E:-6}"
+GPU_F="${GPU_F:-7}"
+
 # Fixed ports — each parallel job needs its own port.
-# Override to avoid conflicts with other running servers, e.g.:
-#   PORT_BASELINE=9010 bash scripts/run_tau2_stress_test.sh
 PORT_BASELINE="${PORT_BASELINE:-8010}"
 PORT_STREAMINGLLM="${PORT_STREAMINGLLM:-8011}"
 PORT_H2O_64="${PORT_H2O_64:-8012}"
@@ -63,7 +59,7 @@ PORT_H2O_32="${PORT_H2O_32:-8013}"
 PORT_H2O_128="${PORT_H2O_128:-8014}"
 PORT_H2O_256="${PORT_H2O_256:-8015}"
 
-# ── Environment ─────────────────────────────────────────────────────────────
+# Environment
 if [[ -f "$ROOT_DIR/tau2-bench/.env" ]]; then
   set -a
   # shellcheck disable=SC1091
@@ -90,8 +86,6 @@ else
 fi
 
 mkdir -p ./outputs
-
-# ── Helper functions ────────────────────────────────────────────────────────
 
 wait_for_health() {
   local port="$1"
@@ -218,18 +212,14 @@ wait_group() {
   return "$failed"
 }
 
-# ── Phase execution ─────────────────────────────────────────────────────────
-# Phase 1: baseline + streamingllm + h2o(heavy=64) — 3-way core comparison
-#   baseline:      unbounded
-#   streamingllm:  budget = sink+window             (heavy=0 lower bound)
-#   h2o(heavy=64): budget = sink+window+64
+# Phase 1: baseline + streamingllm + h2o(heavy=64)
 run_phase1() {
   echo ""
-  echo "╔══════════════════════════════════════════════════════════════╗"
-  echo "║  Phase 1: core 3-way comparison (window fixed)             ║"
-  echo "╠══════════════════════════════════════════════════════════════╣"
-  echo "║  baseline     | streamingllm(heavy=0) | h2o(heavy=64)     ║"
-  echo "╚══════════════════════════════════════════════════════════════╝"
+  echo "=============================================================="
+  echo "Phase 1: core 3-way comparison (window fixed)"
+  echo "baseline | streamingllm(heavy=0) | h2o(heavy=64)"
+  echo "GPUs: A=$GPU_A B=$GPU_B C=$GPU_C"
+  echo "=============================================================="
 
   run_config "baseline"     "$GPU_A" 0  "$PORT_BASELINE"     &
   local pid_a=$!
@@ -241,44 +231,47 @@ run_phase1() {
   wait_group "$pid_a" "$pid_b" "$pid_c"
 }
 
-# Phase 2: h2o heavy sweep — heavy=32, 128, 256
-#   Sweeps the full meaningful range (all well below AGENT_MAX_TOKENS=512).
-#   budget = sink+window+32=164 / +128=260 / +256=388
+# Phase 2: h2o heavy sweep on GPUs 5/6/7 by default
 run_phase2() {
   echo ""
-  echo "╔══════════════════════════════════════════════════════════════╗"
-  echo "║  Phase 2: h2o heavy sweep (heavy=32, 128, 256)             ║"
-  echo "╚══════════════════════════════════════════════════════════════╝"
+  echo "=============================================================="
+  echo "Phase 2: h2o heavy sweep (heavy=32,128,256)"
+  echo "GPUs: D=$GPU_D E=$GPU_E F=$GPU_F"
+  echo "=============================================================="
 
-  run_config "h2o" "$GPU_A" 32  "$PORT_H2O_32"  &
+  run_config "h2o" "$GPU_D" 32  "$PORT_H2O_32"  &
   local pid_a=$!
-  run_config "h2o" "$GPU_B" 128 "$PORT_H2O_128" &
+  run_config "h2o" "$GPU_E" 128 "$PORT_H2O_128" &
   local pid_b=$!
-  run_config "h2o" "$GPU_C" 256 "$PORT_H2O_256" &
+  run_config "h2o" "$GPU_F" 256 "$PORT_H2O_256" &
   local pid_c=$!
 
   wait_group "$pid_a" "$pid_b" "$pid_c"
 }
 
-# ── Main ────────────────────────────────────────────────────────────────────
-echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║  H2O Heavy-Hitter Stress Test                              ║"
-echo "║  Model:    $MODEL_PATH"
-echo "║  Domain:   $DOMAIN  Split: $TASK_SPLIT"
-echo "║  Trials:   $NUM_TRIALS  Tasks: $NUM_TASKS"
-echo "║  Sink:     $SINK_SIZE   Window (fixed): $WINDOW_SIZE"
-echo "║  Agent max_tokens: $AGENT_MAX_TOKENS"
-echo "║  Evict period:  $EVICT_PERIOD"
-echo "║  GPUs:     A=$GPU_A  B=$GPU_B  C=$GPU_C"
-echo "║  Phase:    ${PHASE} (0=all)"
-echo "╚══════════════════════════════════════════════════════════════╝"
+echo "=============================================================="
+echo "H2O Heavy-Hitter Stress Test (Phase2 on GPU 5/6/7 variant)"
+echo "Model:    $MODEL_PATH"
+echo "Domain:   $DOMAIN  Split: $TASK_SPLIT"
+echo "Trials:   $NUM_TRIALS  Tasks: $NUM_TASKS"
+echo "Sink:     $SINK_SIZE   Window (fixed): $WINDOW_SIZE"
+echo "Agent max_tokens: $AGENT_MAX_TOKENS"
+echo "Evict period:  $EVICT_PERIOD"
+echo "Phase1 GPUs: A=$GPU_A B=$GPU_B C=$GPU_C"
+echo "Phase2 GPUs: D=$GPU_D E=$GPU_E F=$GPU_F"
+echo "Phase:    ${PHASE} (0=all)"
+echo "=============================================================="
 
 FAILED=0
 
 case "$PHASE" in
   0)
-    run_phase1 || FAILED=1
-    run_phase2 || FAILED=1
+    echo "[info] PHASE=0: run phase1 and phase2 in parallel"
+    run_phase1 &
+    local_phase1_pid=$!
+    run_phase2 &
+    local_phase2_pid=$!
+    wait_group "$local_phase1_pid" "$local_phase2_pid" || FAILED=1
     ;;
   1) run_phase1 || FAILED=1 ;;
   2) run_phase2 || FAILED=1 ;;

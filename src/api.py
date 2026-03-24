@@ -4,10 +4,9 @@ import time
 from dataclasses import asdict, dataclass
 from typing import Any
 
-import numpy as np
 import torch
 
-from .methods import METHODS
+from .methods import METHODS, prune_streaming_prompt
 from .model import LocalTransformerModel, StepTrace
 from .utils import normalize_sample
 
@@ -122,10 +121,16 @@ class OracleKVProjectAPI:
         stop_on_eos: bool,
         save_step_trace: bool,
         prompt_len: int,
+        evict_period: int = 1,
     ) -> tuple[list[int], list[StepTrace]]:
+        sink_size = policy.sink_size
         cache_budget = policy.cache_budget
+        device = self.model.model.device
 
         cached_logits, past_key_values = self.model.prefill_next_token_logits(token_ids)
+
+        # Pre-allocate sink indices tensor (reused every eviction step).
+        sink_indices = torch.arange(sink_size, device=device, dtype=torch.long)
 
         generated_ids: list[int] = []
         traces: list[StepTrace] = []
@@ -149,15 +154,19 @@ class OracleKVProjectAPI:
             if stop_on_eos and eos_token_id is not None and next_id == eos_token_id:
                 break
 
+            # StreamingLLM eviction: sink tokens are fixed, window slides.
+            # When over budget, directly drop the oldest non-sink tokens
+            # (at positions sink_size .. sink_size+excess-1).
             next_total = active_token_count + 1
-            if next_total > cache_budget:
-                keep_idx = policy.select_keep_indices(
-                    next_total,
-                    np.zeros(next_total, dtype=np.float64),
-                )
-                existing_keep = [i for i in keep_idx if i < active_token_count]
-                past_key_values = self.model.prune_past_key_values(past_key_values, existing_keep)
-                active_token_count = len(existing_keep)
+            if next_total > cache_budget + evict_period - 1:
+                excess = next_total - cache_budget
+                keep = torch.cat([
+                    sink_indices,
+                    torch.arange(sink_size + excess, active_token_count,
+                                 device=device, dtype=torch.long),
+                ])
+                past_key_values = self.model.prune_past_key_values(past_key_values, keep)
+                active_token_count -= excess
 
             cached_logits, past_key_values = self.model.next_token_logits_from_cache(
                 next_id,
@@ -177,17 +186,27 @@ class OracleKVProjectAPI:
         stop_on_eos: bool,
         save_step_trace: bool,
         prompt_len: int,
+        evict_period: int = 1,
     ) -> tuple[list[int], list[StepTrace]]:
-        active_keep = policy.select_streaming_keep_indices(len(token_ids))
-        active_ids = [token_ids[i] for i in active_keep]
-        score_counters = torch.zeros(
-            len(active_ids),
-            dtype=torch.float32,
-            device=self.model.model.device,
+        # H2O = StreamingLLM (sink + window) + heavy-hitter (topk from middle).
+        # Prefill with ALL prompt tokens so attention scores cover the full
+        # prompt — heavy-hitters are selected from actual attention, not zeros.
+        cached_logits, past_key_values, attention_scores = (
+            self.model.prefill_next_token_logits_with_attention(token_ids)
         )
 
-        cached_logits, past_key_values, attention_scores = self.model.prefill_next_token_logits_with_attention(active_ids)
-        self._accumulate_h2o_scores(score_counters, attention_scores)
+        device = attention_scores.device
+        score_counters = attention_scores.clone()
+        active_token_count = len(token_ids)
+        _zero = torch.zeros(1, dtype=score_counters.dtype, device=device)
+
+        # Initial pruning: use H2O policy (sink + topk heavy-hitters + window)
+        # based on real attention scores from the full prompt.
+        if active_token_count > policy.cache_budget:
+            keep_tensor = policy.select_keep_tensor(active_token_count, score_counters)
+            score_counters = score_counters[keep_tensor]
+            past_key_values = self.model.prune_past_key_values(past_key_values, keep_tensor)
+            active_token_count = keep_tensor.numel()
 
         generated_ids: list[int] = []
         traces: list[StepTrace] = []
@@ -199,8 +218,8 @@ class OracleKVProjectAPI:
                     StepTrace(
                         step=step,
                         full_context_tokens=prompt_len + len(generated_ids),
-                        kept_tokens=len(active_ids),
-                        kept_ratio=len(active_ids) / max(prompt_len + len(generated_ids), 1),
+                        kept_tokens=active_token_count,
+                        kept_ratio=active_token_count / max(prompt_len + len(generated_ids), 1),
                     )
                 )
 
@@ -210,32 +229,32 @@ class OracleKVProjectAPI:
             if stop_on_eos and eos_token_id is not None and next_id == eos_token_id:
                 break
 
-            next_total_tokens = len(active_ids) + 1
-            if next_total_tokens > policy.cache_budget:
-                keep_idx = policy.select_keep_indices(
-                    next_total_tokens,
-                    torch.cat(
-                        [
-                            score_counters,
-                            torch.zeros(1, dtype=score_counters.dtype, device=score_counters.device),
-                        ]
-                    ),
-                )
-                existing_keep_idx = [idx for idx in keep_idx if idx < len(active_ids)]
-                active_ids = [active_ids[idx] for idx in existing_keep_idx]
-                score_counters = score_counters[existing_keep_idx]
-                past_key_values = self.model.prune_past_key_values(past_key_values, existing_keep_idx)
+            next_total_tokens = active_token_count + 1
+            need_evict = next_total_tokens > policy.cache_budget + evict_period - 1
+            if need_evict:
+                extended_scores = torch.cat([score_counters, _zero])
+                keep_tensor = policy.select_keep_tensor(next_total_tokens, extended_scores)
+                # Filter out the not-yet-inserted new-token index.
+                keep_tensor = keep_tensor[keep_tensor < active_token_count]
+                score_counters = score_counters[keep_tensor]
+                past_key_values = self.model.prune_past_key_values(past_key_values, keep_tensor)
+                active_token_count = keep_tensor.numel()
 
-            active_ids.append(next_id)
-            score_counters = torch.cat(
-                [score_counters, torch.zeros(1, dtype=score_counters.dtype, device=score_counters.device)]
-            )
-            cached_logits, past_key_values, attention_scores = self.model.next_token_logits_from_cache_with_attention(
-                next_id,
-                past_key_values,
-                expected_tokens=len(active_ids),
-            )
-            self._accumulate_h2o_scores(score_counters, attention_scores)
+            score_counters = torch.cat([score_counters, _zero])
+            active_token_count += 1
+
+            if evict_period <= 1 or need_evict:
+                cached_logits, past_key_values, attention_scores = self.model.next_token_logits_from_cache_with_attention(
+                    next_id,
+                    past_key_values,
+                    expected_tokens=active_token_count,
+                )
+                self._accumulate_h2o_scores(score_counters, attention_scores)
+            else:
+                cached_logits, past_key_values = self.model.next_token_logits_from_cache(
+                    next_id,
+                    past_key_values,
+                )
 
         return generated_ids, traces
 
@@ -245,7 +264,8 @@ class OracleKVProjectAPI:
         methods: list[str],
         method_configs: dict[str, dict[str, Any]] | None = None,
         *,
-        max_new_tokens: int = 1024,
+        max_new_tokens: int = 512,
+        evict_period: int = 1,
         temperature: float = 0.0,
         top_p: float = 1.0,
         stop_on_eos: bool = True,
@@ -290,11 +310,7 @@ class OracleKVProjectAPI:
                             full_context_tokens=len(full_ids),
                         )
                     else:
-                        keep_idx = policy.select_keep_indices(
-                            len(full_ids),
-                            np.zeros(len(full_ids), dtype=np.float64),
-                        )
-                        pruned_ids = [full_ids[i] for i in keep_idx]
+                        pruned_ids = prune_streaming_prompt(full_ids, policy)
                         generated_ids, traces = self._generate_with_streaming_cache(
                             token_ids=pruned_ids,
                             policy=policy,
@@ -304,6 +320,7 @@ class OracleKVProjectAPI:
                             stop_on_eos=stop_on_eos,
                             save_step_trace=save_step_trace,
                             prompt_len=prompt_len,
+                            evict_period=evict_period,
                         )
                     elapsed = time.perf_counter() - t0
                 else:
@@ -317,6 +334,7 @@ class OracleKVProjectAPI:
                         stop_on_eos=stop_on_eos,
                         save_step_trace=save_step_trace,
                         prompt_len=prompt_len,
+                        evict_period=evict_period,
                     )
                     elapsed = time.perf_counter() - t0
                 output_text = self.model.tokenizer.decode(generated_ids, skip_special_tokens=True)

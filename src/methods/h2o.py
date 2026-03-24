@@ -59,6 +59,54 @@ class H2OPolicy:
         adjusted_scores = scores.astype(np.float64, copy=False) + tie_break * 1e-6
         return np.argpartition(adjusted_scores, -k)[-k:]
 
+    def _compute_keep_layout(
+        self, total_tokens: int
+    ) -> tuple[int, int, int, int]:
+        """Return (sink_end, recent_start, heavy_budget, candidate_count)."""
+        sink_end = min(self.sink_size, total_tokens)
+        recent_start = max(sink_end, total_tokens - self.local_window_size)
+        protected_tokens = sink_end + max(0, total_tokens - recent_start)
+        heavy_budget = max(0, self.cache_budget - protected_tokens)
+        candidate_count = max(0, recent_start - sink_end)
+        return sink_end, recent_start, heavy_budget, candidate_count
+
+    def select_keep_tensor(
+        self,
+        total_tokens: int,
+        cumulative_scores: torch.Tensor,
+    ) -> torch.Tensor:
+        """GPU-resident version that avoids list round-trips."""
+        device = cumulative_scores.device
+        if total_tokens <= 0:
+            return torch.empty(0, device=device, dtype=torch.long)
+        if total_tokens <= self.cache_budget:
+            return torch.arange(total_tokens, device=device, dtype=torch.long)
+
+        sink_end, recent_start, heavy_budget, candidate_count = (
+            self._compute_keep_layout(total_tokens)
+        )
+
+        parts: list[torch.Tensor] = []
+        if sink_end > 0:
+            parts.append(torch.arange(sink_end, device=device, dtype=torch.long))
+        if total_tokens > recent_start:
+            parts.append(
+                torch.arange(recent_start, total_tokens, device=device, dtype=torch.long)
+            )
+        if candidate_count > 0 and heavy_budget > 0:
+            k = min(heavy_budget, candidate_count)
+            if k >= candidate_count:
+                parts.append(
+                    torch.arange(sink_end, recent_start, device=device, dtype=torch.long)
+                )
+            else:
+                mid_scores = cumulative_scores[sink_end:recent_start]
+                topk_rel = self._topk_with_recent_tiebreak_torch(mid_scores, k)
+                parts.append(topk_rel.to(torch.long) + sink_end)
+
+        # Parts (sink / heavy-hitters / window) are disjoint — sort is enough.
+        return torch.cat(parts).sort().values
+
     def select_keep_indices(
         self,
         total_tokens: int,
@@ -69,32 +117,12 @@ class H2OPolicy:
         if total_tokens <= self.cache_budget:
             return list(range(total_tokens))
 
-        sink_end = min(self.sink_size, total_tokens)
-        recent_start = max(sink_end, total_tokens - self.local_window_size)
-        protected_tokens = sink_end + max(0, total_tokens - recent_start)
-        heavy_budget = max(0, self.cache_budget - protected_tokens)
-        candidate_count = max(0, recent_start - sink_end)
-
         if torch.is_tensor(cumulative_scores):
-            parts: list[torch.Tensor] = []
-            if sink_end > 0:
-                parts.append(torch.arange(sink_end, device=cumulative_scores.device, dtype=torch.long))
-            if total_tokens > recent_start:
-                parts.append(
-                    torch.arange(recent_start, total_tokens, device=cumulative_scores.device, dtype=torch.long)
-                )
+            return self.select_keep_tensor(total_tokens, cumulative_scores).tolist()
 
-            if candidate_count > 0 and heavy_budget > 0:
-                k = min(heavy_budget, candidate_count)
-                if k >= candidate_count:
-                    topk_rel = torch.arange(candidate_count, device=cumulative_scores.device, dtype=torch.long)
-                else:
-                    mid_scores = cumulative_scores[sink_end:recent_start]
-                    topk_rel = self._topk_with_recent_tiebreak_torch(mid_scores, k)
-                parts.append(topk_rel.to(torch.long) + sink_end)
-
-            keep_idx = torch.unique(torch.cat(parts), sorted=True)
-            return keep_idx.tolist()
+        sink_end, recent_start, heavy_budget, candidate_count = (
+            self._compute_keep_layout(total_tokens)
+        )
 
         keep = set(range(sink_end))
         keep.update(range(recent_start, total_tokens))
