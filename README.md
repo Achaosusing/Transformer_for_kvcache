@@ -277,25 +277,54 @@ python offline_infer.py \
 |------|------|
 | `scripts/run_tau2_offline_sequential.sh` | 单 GPU 顺序评测 baseline → streamingllm → h2o |
 | `scripts/run_tau2_offline_parallel_multi_gpu.sh` | 多 GPU 并行评测 |
-| `scripts/run_tau2_stress_test.sh` | 多窗口参数压力测试（推荐） |
+| `scripts/run_tau2_stress_test.sh` | H2O heavy-hitter 压力测试（推荐） |
 
 ### 压力测试
 
 ```bash
-# 全部 7 组配置（baseline + streamingllm + h2o×5）
+# 全部 6 组配置（baseline + streamingllm + h2o×4）
 bash scripts/run_tau2_stress_test.sh
 
 # Phase 1：baseline + streamingllm(heavy=0) + h2o(heavy=64) 三方核心对比
 PHASE=1 bash scripts/run_tau2_stress_test.sh
 
-# Phase 2：h2o heavy 小预算扫描（heavy=32, 128）
+# Phase 2：h2o heavy sweep（heavy=32, 128, 256）
 PHASE=2 bash scripts/run_tau2_stress_test.sh
-
-# Phase 3：h2o heavy 大预算扫描（heavy=256, 512）
-PHASE=3 bash scripts/run_tau2_stress_test.sh
 ```
 
-参数网格（window 固定，扫描 heavy-hitter 大小）：
+当前脚本默认参数：
+
+| 参数 | 默认值 |
+|------|--------|
+| `MODEL_PATH` | `./local_models/Qwen3.5-9B` |
+| `DOMAIN` | `airline` |
+| `TASK_SPLIT` | `base` |
+| `USER_LLM` | `deepseek/deepseek-chat` |
+| `SERVED_MODEL_NAME` | `gpt-4o` |
+| `HOST` | `127.0.0.1` |
+| `TIMEOUT_SECONDS` | `800` |
+| `TASK_TIMEOUT_SECONDS` | `800` |
+| `MAX_CONCURRENCY` | `3` |
+| `NUM_TRIALS` | `1` |
+| `NUM_TASKS` | `50` |
+| `AGENT_MAX_TOKENS` | `1024` |
+| `SINK_SIZE` | `4` |
+| `WINDOW_SIZE` | `128` |
+| `GPU_MEMORY_UTILIZATION` | `0.9` |
+| `DEVICE` | `cuda` |
+| `DTYPE` | `auto` |
+| `PHASE` | `0` |
+| `GPU_A` | `2` |
+| `GPU_B` | `3` |
+| `GPU_C` | `4` |
+| `PORT_BASELINE` | `8010` |
+| `PORT_STREAMINGLLM` | `8011` |
+| `PORT_H2O_64` | `8012` |
+| `PORT_H2O_32` | `8013` |
+| `PORT_H2O_128` | `8014` |
+| `PORT_H2O_256` | `8015` |
+
+参数网格（`WINDOW_SIZE` 固定，扫描 `heavy_hitter_size`）：
 
 | 方法 | sink | window(固定) | heavy | cache 预算 |
 |------|------|------------|-------|-----------|
@@ -305,7 +334,16 @@ PHASE=3 bash scripts/run_tau2_stress_test.sh
 | h2o | 4 | 128 | 64 | 196 |
 | h2o | 4 | 128 | 128 | 260 |
 | h2o | 4 | 128 | 256 | 388 |
-| h2o | 4 | 128 | 512 | 644 ← 趋近 baseline |
+
+说明：脚本当前不再包含 `heavy=512`，因为在默认 `AGENT_MAX_TOKENS=1024` 下，这个预算已经明显接近不裁剪场景，压缩对比度不够高。
+
+Phase 组织方式：
+
+| Phase | 内容 |
+|------|------|
+| `0` | 依次运行 Phase 1 和 Phase 2 |
+| `1` | `baseline` + `streamingllm` + `h2o(heavy=64)` |
+| `2` | `h2o(heavy=32)` + `h2o(heavy=128)` + `h2o(heavy=256)` |
 
 可通过环境变量覆盖：
 
@@ -317,7 +355,7 @@ WINDOW_SIZE=256 bash scripts/run_tau2_stress_test.sh
 GPU_A=0 GPU_B=1 GPU_C=2 \
 NUM_TASKS=30 \
 WINDOW_SIZE=128 \
-AGENT_MAX_TOKENS=512 \
+AGENT_MAX_TOKENS=1024 \
 SINK_SIZE=4 \
 bash scripts/run_tau2_stress_test.sh
 ```
@@ -329,8 +367,8 @@ tau2-bench 中 agent 需要生成：
 - 自然语言回复（100-300 tokens）
 - 复杂策略解释（200-500 tokens）
 
-默认 `max_tokens=128` 容易导致回复被截断。建议：
+默认 `max_tokens=128` 容易导致回复被截断。当前项目脚本已统一提升默认值。建议：
 
-- **tau2-bench 压力测试**：使用 512（脚本默认值）
+- **tau2-bench 压力测试**：使用 1024（脚本默认值）
 - **快速 smoke test**：使用 256
 - **通用离线推理**：根据任务长度自定义

@@ -4,9 +4,9 @@ set -euo pipefail
 # Stress test: sweep H2O heavy-hitter sizes with fixed window.
 # Baseline and StreamingLLM serve as lower/upper bounds for comparison.
 #
-# Note: heavy=512 is excluded — with AGENT_MAX_TOKENS=1024 the KV cache budget
-# (sink+window+512=644) would exceed the agent's generation length, making the
-# compression contrast too small to be informative.
+# Note: heavy=512 is excluded. With the current default AGENT_MAX_TOKENS=1024,
+# a cache budget of sink+window+512=644 is already close enough to the
+# no-pruning regime that the compression contrast becomes much less informative.
 #
 # Parameter grid (default, window fixed at WINDOW_SIZE=128):
 #   baseline:    1 config  (no budget)
@@ -45,7 +45,7 @@ WINDOW_SIZE="${WINDOW_SIZE:-128}"   # fixed for all streamingllm/h2o configs
 GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.9}"
 DEVICE="${DEVICE:-cuda}"
 DTYPE="${DTYPE:-auto}"
-PHASE="${PHASE:-0}"  # 0=all, 1/2/3=specific phase
+PHASE="${PHASE:-0}"  # 0=all, 1/2=specific phase
 
 # GPU assignments (override as needed)
 GPU_A="${GPU_A:-2}"
