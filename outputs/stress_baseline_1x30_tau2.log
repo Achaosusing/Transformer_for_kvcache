@@ -1,6 +1,6 @@
-2026-03-24 03:16:14.122 | INFO     | tau2.utils.utils:<module>:27 - Using data directory from source: /mnt/task_runtime/shiyl_workspace/workspace/haohong/Transformer_for_kvcache/tau2-bench/data
-2026-03-24 03:16:16.766 | INFO     | tau2.utils.llm_utils:<module>:65 - LiteLLM: Cache is disabled
-2026-03-24 03:16:16.766 | WARNING  | tau2.utils.llm_utils:<module>:72 - Sonnet thinking is disabled
+2026-03-24 05:27:54.448 | INFO     | tau2.utils.utils:<module>:27 - Using data directory from source: /mnt/task_runtime/shiyl_workspace/workspace/haohong/Transformer_for_kvcache/tau2-bench/data
+2026-03-24 05:27:57.199 | INFO     | tau2.utils.llm_utils:<module>:65 - LiteLLM: Cache is disabled
+2026-03-24 05:27:57.199 | WARNING  | tau2.utils.llm_utils:<module>:72 - Sonnet thinking is disabled
 ╭────────────────────────── Simulation Configuration ──────────────────────────╮
 │ Domain: airline                                                              │
 │ Task Set: Default                                                            │
@@ -30,31 +30,12 @@
 1/30 (trial 1/1). Running task 1, trial 1
 2/30 (trial 1/1). Running task 2, trial 1
 ╭──────────────────────────── Simulation Overview ─────────────────────────────╮
-│ Task ID: 0                                                                   │
-│ Trial: 0                                                                     │
-│ Duration: 135.54s                                                            │
-│ Termination Reason: TerminationReason.USER_STOP                              │
-│ Agent Cost: $0.0321                                                          │
-│ User Cost: $0.0004                                                           │
-│ Reward: ✅ 1.0000 (COMMUNICATE: 1.0, DB: 1.0)                                │
-│                                                                              │
-│ DB Check:✅ 1.0                                                              │
-│                                                                              │
-│ Additional Info:                                                             │
-│ env: None                                                                    │
-│ nl: None                                                                     │
-│ communicate: {'note': 'No communicate_info to evaluate'}                     │
-│ action: {'note': 'No actions to evaluate'}                                   │
-│                                                                              │
-╰──────────────────────────────────────────────────────────────────────────────╯
-3/30 (trial 1/1). Running task 3, trial 1
-╭──────────────────────────── Simulation Overview ─────────────────────────────╮
 │ Task ID: 1                                                                   │
 │ Trial: 0                                                                     │
-│ Duration: 196.45s                                                            │
+│ Duration: 120.05s                                                            │
 │ Termination Reason: TerminationReason.USER_STOP                              │
-│ Agent Cost: $0.0592                                                          │
-│ User Cost: $0.0006                                                           │
+│ Agent Cost: $0.0411                                                          │
+│ User Cost: $0.0004                                                           │
 │ Reward: ✅ 1.0000 (COMMUNICATE: 1.0, DB: 1.0)                                │
 │                                                                              │
 │ DB Check:✅ 1.0                                                              │
@@ -70,15 +51,34 @@
 │ action: None                                                                 │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
+3/30 (trial 1/1). Running task 3, trial 1
+╭──────────────────────────── Simulation Overview ─────────────────────────────╮
+│ Task ID: 0                                                                   │
+│ Trial: 0                                                                     │
+│ Duration: 179.79s                                                            │
+│ Termination Reason: TerminationReason.USER_STOP                              │
+│ Agent Cost: $0.0408                                                          │
+│ User Cost: $0.0004                                                           │
+│ Reward: ✅ 1.0000 (COMMUNICATE: 1.0, DB: 1.0)                                │
+│                                                                              │
+│ DB Check:✅ 1.0                                                              │
+│                                                                              │
+│ Additional Info:                                                             │
+│ env: None                                                                    │
+│ nl: None                                                                     │
+│ communicate: {'note': 'No communicate_info to evaluate'}                     │
+│ action: {'note': 'No actions to evaluate'}                                   │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
 4/30 (trial 1/1). Running task 4, trial 1
 ╭──────────────────────────── Simulation Overview ─────────────────────────────╮
 │ Task ID: 3                                                                   │
 │ Trial: 0                                                                     │
-│ Duration: 88.54s                                                             │
+│ Duration: 66.58s                                                             │
 │ Termination Reason: TerminationReason.USER_STOP                              │
-│ Agent Cost: $0.0278                                                          │
-│ User Cost: $0.0002                                                           │
-│ Reward: ✅ 1.0000 (COMMUNICATE: 1.0, DB: 1.0)                                │
+│ Agent Cost: $0.0274                                                          │
+│ User Cost: $0.0003                                                           │
+│ Reward: ❌ 0.0000 (COMMUNICATE: 0.0, DB: 1.0)                                │
 │                                                                              │
 │ DB Check:✅ 1.0                                                              │
 │                                                                              │
@@ -87,7 +87,7 @@
 │ - 1: get_user_details ❌ 0.0                                                 │
 │                                                                              │
 │ Communicate Checks:                                                          │
-│ - 0: 4 ✅                                                                    │
+│ - 0: 4 ❌                                                                    │
 │                                                                              │
 │ Additional Info:                                                             │
 │ env: None                                                                    │
@@ -100,10 +100,10 @@
 ╭──────────────────────────── Simulation Overview ─────────────────────────────╮
 │ Task ID: 2                                                                   │
 │ Trial: 0                                                                     │
-│ Duration: 272.22s                                                            │
+│ Duration: 269.66s                                                            │
 │ Termination Reason: TerminationReason.USER_STOP                              │
-│ Agent Cost: $0.0821                                                          │
-│ User Cost: $0.0009                                                           │
+│ Agent Cost: $0.0780                                                          │
+│ User Cost: $0.0010                                                           │
 │ Reward: ❌ 0.0000 (COMMUNICATE: 1.0, DB: 0.0)                                │
 │                                                                              │
 │ DB Check:❌ 0.0                                                              │
@@ -125,10 +125,10 @@
 ╭──────────────────────────── Simulation Overview ─────────────────────────────╮
 │ Task ID: 6                                                                   │
 │ Trial: 0                                                                     │
-│ Duration: 78.61s                                                             │
+│ Duration: 72.19s                                                             │
 │ Termination Reason: TerminationReason.USER_STOP                              │
-│ Agent Cost: $0.0275                                                          │
-│ User Cost: $0.0003                                                           │
+│ Agent Cost: $0.0348                                                          │
+│ User Cost: $0.0004                                                           │
 │ Reward: ✅ 1.0000 (COMMUNICATE: 1.0, DB: 1.0)                                │
 │                                                                              │
 │ DB Check:✅ 1.0                                                              │
@@ -147,10 +147,10 @@
 ╭──────────────────────────── Simulation Overview ─────────────────────────────╮
 │ Task ID: 4                                                                   │
 │ Trial: 0                                                                     │
-│ Duration: 165.62s                                                            │
+│ Duration: 174.16s                                                            │
 │ Termination Reason: TerminationReason.USER_STOP                              │
-│ Agent Cost: $0.0391                                                          │
-│ User Cost: $0.0004                                                           │
+│ Agent Cost: $0.0679                                                          │
+│ User Cost: $0.0007                                                           │
 │ Reward: ✅ 1.0000 (COMMUNICATE: 1.0, DB: 1.0)                                │
 │                                                                              │
 │ DB Check:✅ 1.0                                                              │
@@ -172,18 +172,21 @@
 ╰──────────────────────────────────────────────────────────────────────────────╯
 8/30 (trial 1/1). Running task 8, trial 1
 ╭──────────────────────────── Simulation Overview ─────────────────────────────╮
-│ Task ID: 5                                                                   │
+│ Task ID: 8                                                                   │
 │ Trial: 0                                                                     │
-│ Duration: 278.60s                                                            │
+│ Duration: 123.44s                                                            │
 │ Termination Reason: TerminationReason.USER_STOP                              │
-│ Agent Cost: $0.0672                                                          │
-│ User Cost: $0.0008                                                           │
-│ Reward: ✅ 1.0000 (COMMUNICATE: 1.0, DB: 1.0)                                │
+│ Agent Cost: $0.0361                                                          │
+│ User Cost: $0.0005                                                           │
+│ Reward: ❌ 0.0000 (COMMUNICATE: 1.0, DB: 0.0)                                │
 │                                                                              │
-│ DB Check:✅ 1.0                                                              │
+│ DB Check:❌ 0.0                                                              │
 │                                                                              │
 │ Action Checks:                                                               │
 │ - 0: get_user_details ❌ 0.0                                                 │
+│ - 1: get_reservation_details ❌ 0.0                                          │
+│ - 2: search_direct_flight ❌ 0.0                                             │
+│ - 3: book_reservation ❌ 0.0                                                 │
 │                                                                              │
 │ Additional Info:                                                             │
 │ env: None                                                                    │
@@ -193,13 +196,20 @@
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 9/30 (trial 1/1). Running task 9, trial 1
+
+[1;31mGive Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new[0m
+LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.
+
+
+[1;31mProvider List: https://docs.litellm.ai/docs/providers[0m
+
 ╭──────────────────────────── Simulation Overview ─────────────────────────────╮
 │ Task ID: 7                                                                   │
 │ Trial: 0                                                                     │
-│ Duration: 631.92s                                                            │
+│ Duration: 388.82s                                                            │
 │ Termination Reason: TerminationReason.USER_STOP                              │
-│ Agent Cost: $0.2525                                                          │
-│ User Cost: $0.0025                                                           │
+│ Agent Cost: $0.1479                                                          │
+│ User Cost: $0.0016                                                           │
 │ Reward: ❌ 0.0000 (COMMUNICATE: 0.0, DB: 0.0)                                │
 │                                                                              │
 │ DB Check:❌ 0.0                                                              │
@@ -223,12 +233,12 @@
 ╰──────────────────────────────────────────────────────────────────────────────╯
 10/30 (trial 1/1). Running task 10, trial 1
 ╭──────────────────────────── Simulation Overview ─────────────────────────────╮
-│ Task ID: 8                                                                   │
+│ Task ID: 5                                                                   │
 │ Trial: 0                                                                     │
-│ Duration: 802.86s                                                            │
+│ Duration: 800.97s                                                            │
 │ Termination Reason: TerminationReason.TASK_TIMEOUT                           │
-│ Agent Cost: $0.7823                                                          │
-│ User Cost: $0.0088                                                           │
+│ Agent Cost: $0.3965                                                          │
+│ User Cost: $0.0033                                                           │
 │ Reward: ❌ 0.0000 ()                                                         │
 │                                                                              │
 │ Additional Info:                                                             │
@@ -237,25 +247,45 @@
 ╰──────────────────────────────────────────────────────────────────────────────╯
 11/30 (trial 1/1). Running task 11, trial 1
 ╭──────────────────────────── Simulation Overview ─────────────────────────────╮
+│ Task ID: 10                                                                  │
+│ Trial: 0                                                                     │
+│ Duration: 341.92s                                                            │
+│ Termination Reason: TerminationReason.USER_STOP                              │
+│ Agent Cost: $0.1033                                                          │
+│ User Cost: $0.0012                                                           │
+│ Reward: ✅ 1.0000 (COMMUNICATE: 1.0, DB: 1.0)                                │
+│                                                                              │
+│ DB Check:✅ 1.0                                                              │
+│                                                                              │
+│ Additional Info:                                                             │
+│ env: None                                                                    │
+│ nl: None                                                                     │
+│ communicate: {'note': 'No communicate_info to evaluate'}                     │
+│ action: {'note': 'No actions to evaluate'}                                   │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+12/30 (trial 1/1). Running task 12, trial 1
+╭──────────────────────────── Simulation Overview ─────────────────────────────╮
 │ Task ID: 9                                                                   │
 │ Trial: 0                                                                     │
-│ Duration: 823.03s                                                            │
+│ Duration: 801.21s                                                            │
 │ Termination Reason: TerminationReason.TASK_TIMEOUT                           │
-│ Agent Cost: $0.2244                                                          │
-│ User Cost: $0.0029                                                           │
+│ Agent Cost: $0.9844                                                          │
+│ User Cost: $0.0103                                                           │
 │ Reward: ❌ 0.0000 ()                                                         │
 │                                                                              │
 │ Additional Info:                                                             │
 │ note: Simulation terminated prematurely. Termination reason: task_timeout    │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
+13/30 (trial 1/1). Running task 13, trial 1
 ╭──────────────────────────── Simulation Overview ─────────────────────────────╮
 │ Task ID: 11                                                                  │
 │ Trial: 0                                                                     │
-│ Duration: 160.41s                                                            │
+│ Duration: 292.72s                                                            │
 │ Termination Reason: TerminationReason.USER_STOP                              │
-│ Agent Cost: $0.0399                                                          │
-│ User Cost: $0.0003                                                           │
+│ Agent Cost: $0.0943                                                          │
+│ User Cost: $0.0011                                                           │
 │ Reward: ❌ 0.0000 (COMMUNICATE: 0.0, DB: 0.0)                                │
 │                                                                              │
 │ DB Check:❌ 0.0                                                              │
@@ -273,78 +303,14 @@
 │ action: None                                                                 │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-12/30 (trial 1/1). Running task 12, trial 1
-╭──────────────────────────── Simulation Overview ─────────────────────────────╮
-│ Task ID: 10                                                                  │
-│ Trial: 0                                                                     │
-│ Duration: 342.49s                                                            │
-│ Termination Reason: TerminationReason.USER_STOP                              │
-│ Agent Cost: $0.1076                                                          │
-│ User Cost: $0.0011                                                           │
-│ Reward: ✅ 1.0000 (COMMUNICATE: 1.0, DB: 1.0)                                │
-│                                                                              │
-│ DB Check:✅ 1.0                                                              │
-│                                                                              │
-│ Additional Info:                                                             │
-│ env: None                                                                    │
-│ nl: None                                                                     │
-│ communicate: {'note': 'No communicate_info to evaluate'}                     │
-│ action: {'note': 'No actions to evaluate'}                                   │
-│                                                                              │
-╰──────────────────────────────────────────────────────────────────────────────╯
-13/30 (trial 1/1). Running task 13, trial 1
 14/30 (trial 1/1). Running task 14, trial 1
-╭──────────────────────────── Simulation Overview ─────────────────────────────╮
-│ Task ID: 13                                                                  │
-│ Trial: 0                                                                     │
-│ Duration: 132.69s                                                            │
-│ Termination Reason: TerminationReason.USER_STOP                              │
-│ Agent Cost: $0.0369                                                          │
-│ User Cost: $0.0003                                                           │
-│ Reward: ✅ 1.0000 (COMMUNICATE: 1.0, DB: 1.0)                                │
-│                                                                              │
-│ DB Check:✅ 1.0                                                              │
-│                                                                              │
-│ Action Checks:                                                               │
-│ - 0: transfer_to_human_agents ❌ 0.0                                         │
-│                                                                              │
-│ Additional Info:                                                             │
-│ env: None                                                                    │
-│ nl: None                                                                     │
-│ communicate: {'note': 'No communicate_info to evaluate'}                     │
-│ action: None                                                                 │
-│                                                                              │
-╰──────────────────────────────────────────────────────────────────────────────╯
-15/30 (trial 1/1). Running task 15, trial 1
-╭──────────────────────────── Simulation Overview ─────────────────────────────╮
-│ Task ID: 15                                                                  │
-│ Trial: 0                                                                     │
-│ Duration: 188.07s                                                            │
-│ Termination Reason: TerminationReason.USER_STOP                              │
-│ Agent Cost: $0.0467                                                          │
-│ User Cost: $0.0006                                                           │
-│ Reward: ❌ 0.0000 (COMMUNICATE: 1.0, DB: 0.0)                                │
-│                                                                              │
-│ DB Check:❌ 0.0                                                              │
-│                                                                              │
-│ Action Checks:                                                               │
-│ - 0: update_reservation_flights ❌ 0.0                                       │
-│                                                                              │
-│ Additional Info:                                                             │
-│ env: None                                                                    │
-│ nl: None                                                                     │
-│ communicate: {'note': 'No communicate_info to evaluate'}                     │
-│ action: None                                                                 │
-│                                                                              │
-╰──────────────────────────────────────────────────────────────────────────────╯
-16/30 (trial 1/1). Running task 16, trial 1
 ╭──────────────────────────── Simulation Overview ─────────────────────────────╮
 │ Task ID: 12                                                                  │
 │ Trial: 0                                                                     │
-│ Duration: 550.38s                                                            │
+│ Duration: 276.61s                                                            │
 │ Termination Reason: TerminationReason.USER_STOP                              │
-│ Agent Cost: $0.1633                                                          │
-│ User Cost: $0.0017                                                           │
+│ Agent Cost: $0.0997                                                          │
+│ User Cost: $0.0010                                                           │
 │ Reward: ❌ 0.0000 (COMMUNICATE: 1.0, DB: 0.0)                                │
 │                                                                              │
 │ DB Check:❌ 0.0                                                              │
@@ -363,40 +329,57 @@
 │ action: None                                                                 │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-17/30 (trial 1/1). Running task 17, trial 1
+15/30 (trial 1/1). Running task 15, trial 1
 ╭──────────────────────────── Simulation Overview ─────────────────────────────╮
-│ Task ID: 14                                                                  │
+│ Task ID: 15                                                                  │
 │ Trial: 0                                                                     │
-│ Duration: 586.66s                                                            │
+│ Duration: 38.63s                                                             │
 │ Termination Reason: TerminationReason.USER_STOP                              │
-│ Agent Cost: $0.1755                                                          │
-│ User Cost: $0.0020                                                           │
-│ Reward: ❌ 0.0000 (COMMUNICATE: 0.0, DB: 0.0)                                │
+│ Agent Cost: $0.0158                                                          │
+│ User Cost: $0.0002                                                           │
+│ Reward: ❌ 0.0000 (COMMUNICATE: 1.0, DB: 0.0)                                │
 │                                                                              │
 │ DB Check:❌ 0.0                                                              │
 │                                                                              │
 │ Action Checks:                                                               │
-│ - 0: cancel_reservation ❌ 0.0                                               │
-│ - 1: book_reservation ❌ 0.0                                                 │
-│                                                                              │
-│ Communicate Checks:                                                          │
-│ - 0: 327 ❌                                                                  │
-│ - 1: 1000 ❌                                                                 │
-│ - 2: 44 ❌                                                                   │
+│ - 0: update_reservation_flights ❌ 0.0                                       │
 │                                                                              │
 │ Additional Info:                                                             │
 │ env: None                                                                    │
 │ nl: None                                                                     │
-│ communicate: None                                                            │
+│ communicate: {'note': 'No communicate_info to evaluate'}                     │
 │ action: None                                                                 │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
+16/30 (trial 1/1). Running task 16, trial 1
+╭──────────────────────────── Simulation Overview ─────────────────────────────╮
+│ Task ID: 13                                                                  │
+│ Trial: 0                                                                     │
+│ Duration: 134.07s                                                            │
+│ Termination Reason: TerminationReason.USER_STOP                              │
+│ Agent Cost: $0.0373                                                          │
+│ User Cost: $0.0003                                                           │
+│ Reward: ✅ 1.0000 (COMMUNICATE: 1.0, DB: 1.0)                                │
+│                                                                              │
+│ DB Check:✅ 1.0                                                              │
+│                                                                              │
+│ Action Checks:                                                               │
+│ - 0: transfer_to_human_agents ❌ 0.0                                         │
+│                                                                              │
+│ Additional Info:                                                             │
+│ env: None                                                                    │
+│ nl: None                                                                     │
+│ communicate: {'note': 'No communicate_info to evaluate'}                     │
+│ action: None                                                                 │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+17/30 (trial 1/1). Running task 17, trial 1
 ╭──────────────────────────── Simulation Overview ─────────────────────────────╮
 │ Task ID: 17                                                                  │
 │ Trial: 0                                                                     │
-│ Duration: 36.58s                                                             │
+│ Duration: 35.16s                                                             │
 │ Termination Reason: TerminationReason.USER_STOP                              │
-│ Agent Cost: $0.0157                                                          │
+│ Agent Cost: $0.0156                                                          │
 │ User Cost: $0.0002                                                           │
 │ Reward: ❌ 0.0000 (COMMUNICATE: 1.0, DB: 0.0)                                │
 │                                                                              │
@@ -415,20 +398,26 @@
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 18/30 (trial 1/1). Running task 18, trial 1
-19/30 (trial 1/1). Running task 19, trial 1
+
+[1;31mGive Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new[0m
+LiteLLM.Info: If you need to debug this error, use `litellm._turn_on_debug()'.
+
+
+[1;31mProvider List: https://docs.litellm.ai/docs/providers[0m
+
 ╭──────────────────────────── Simulation Overview ─────────────────────────────╮
-│ Task ID: 19                                                                  │
+│ Task ID: 16                                                                  │
 │ Trial: 0                                                                     │
-│ Duration: 35.40s                                                             │
+│ Duration: 176.55s                                                            │
 │ Termination Reason: TerminationReason.USER_STOP                              │
-│ Agent Cost: $0.0156                                                          │
-│ User Cost: $0.0002                                                           │
+│ Agent Cost: $0.0636                                                          │
+│ User Cost: $0.0006                                                           │
 │ Reward: ❌ 0.0000 (COMMUNICATE: 1.0, DB: 0.0)                                │
 │                                                                              │
 │ DB Check:❌ 0.0                                                              │
 │                                                                              │
 │ Action Checks:                                                               │
-│ - 0: cancel_reservation ❌ 0.0                                               │
+│ - 0: update_reservation_flights ❌ 0.0                                       │
 │                                                                              │
 │ Additional Info:                                                             │
 │ env: None                                                                    │
@@ -437,14 +426,14 @@
 │ action: None                                                                 │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-20/30 (trial 1/1). Running task 20, trial 1
+19/30 (trial 1/1). Running task 19, trial 1
 ╭──────────────────────────── Simulation Overview ─────────────────────────────╮
 │ Task ID: 18                                                                  │
 │ Trial: 0                                                                     │
-│ Duration: 42.43s                                                             │
+│ Duration: 136.19s                                                            │
 │ Termination Reason: TerminationReason.USER_STOP                              │
-│ Agent Cost: $0.0162                                                          │
-│ User Cost: $0.0002                                                           │
+│ Agent Cost: $0.0394                                                          │
+│ User Cost: $0.0005                                                           │
 │ Reward: ❌ 0.0000 (COMMUNICATE: 0.0, DB: 0.0)                                │
 │                                                                              │
 │ DB Check:❌ 0.0                                                              │
@@ -466,58 +455,36 @@
 │ action: None                                                                 │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
+20/30 (trial 1/1). Running task 20, trial 1
+╭──────────────────────────── Simulation Overview ─────────────────────────────╮
+│ Task ID: 19                                                                  │
+│ Trial: 0                                                                     │
+│ Duration: 36.60s                                                             │
+│ Termination Reason: TerminationReason.USER_STOP                              │
+│ Agent Cost: $0.0156                                                          │
+│ User Cost: $0.0002                                                           │
+│ Reward: ❌ 0.0000 (COMMUNICATE: 1.0, DB: 0.0)                                │
+│                                                                              │
+│ DB Check:❌ 0.0                                                              │
+│                                                                              │
+│ Action Checks:                                                               │
+│ - 0: cancel_reservation ❌ 0.0                                               │
+│                                                                              │
+│ Additional Info:                                                             │
+│ env: None                                                                    │
+│ nl: None                                                                     │
+│ communicate: {'note': 'No communicate_info to evaluate'}                     │
+│ action: None                                                                 │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
 21/30 (trial 1/1). Running task 21, trial 1
-╭──────────────────────────── Simulation Overview ─────────────────────────────╮
-│ Task ID: 16                                                                  │
-│ Trial: 0                                                                     │
-│ Duration: 373.53s                                                            │
-│ Termination Reason: TerminationReason.USER_STOP                              │
-│ Agent Cost: $0.1203                                                          │
-│ User Cost: $0.0013                                                           │
-│ Reward: ❌ 0.0000 (COMMUNICATE: 1.0, DB: 0.0)                                │
-│                                                                              │
-│ DB Check:❌ 0.0                                                              │
-│                                                                              │
-│ Action Checks:                                                               │
-│ - 0: update_reservation_flights ❌ 0.0                                       │
-│                                                                              │
-│ Additional Info:                                                             │
-│ env: None                                                                    │
-│ nl: None                                                                     │
-│ communicate: {'note': 'No communicate_info to evaluate'}                     │
-│ action: None                                                                 │
-│                                                                              │
-╰──────────────────────────────────────────────────────────────────────────────╯
-22/30 (trial 1/1). Running task 22, trial 1
-╭──────────────────────────── Simulation Overview ─────────────────────────────╮
-│ Task ID: 20                                                                  │
-│ Trial: 0                                                                     │
-│ Duration: 155.51s                                                            │
-│ Termination Reason: TerminationReason.USER_STOP                              │
-│ Agent Cost: $0.0462                                                          │
-│ User Cost: $0.0004                                                           │
-│ Reward: ❌ 0.0000 (COMMUNICATE: 1.0, DB: 0.0)                                │
-│                                                                              │
-│ DB Check:❌ 0.0                                                              │
-│                                                                              │
-│ Action Checks:                                                               │
-│ - 0: book_reservation ❌ 0.0                                                 │
-│                                                                              │
-│ Additional Info:                                                             │
-│ env: None                                                                    │
-│ nl: None                                                                     │
-│ communicate: {'note': 'No communicate_info to evaluate'}                     │
-│ action: None                                                                 │
-│                                                                              │
-╰──────────────────────────────────────────────────────────────────────────────╯
-23/30 (trial 1/1). Running task 23, trial 1
 ╭──────────────────────────── Simulation Overview ─────────────────────────────╮
 │ Task ID: 21                                                                  │
 │ Trial: 0                                                                     │
-│ Duration: 152.82s                                                            │
+│ Duration: 161.77s                                                            │
 │ Termination Reason: TerminationReason.USER_STOP                              │
-│ Agent Cost: $0.0463                                                          │
-│ User Cost: $0.0004                                                           │
+│ Agent Cost: $0.0388                                                          │
+│ User Cost: $0.0003                                                           │
 │ Reward: ❌ 0.0000 (COMMUNICATE: 1.0, DB: 0.0)                                │
 │                                                                              │
 │ DB Check:❌ 0.0                                                              │
@@ -533,36 +500,14 @@
 │ action: None                                                                 │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-24/30 (trial 1/1). Running task 24, trial 1
-╭──────────────────────────── Simulation Overview ─────────────────────────────╮
-│ Task ID: 24                                                                  │
-│ Trial: 0                                                                     │
-│ Duration: 30.95s                                                             │
-│ Termination Reason: TerminationReason.USER_STOP                              │
-│ Agent Cost: $0.0109                                                          │
-│ User Cost: $0.0002                                                           │
-│ Reward: ❌ 0.0000 (COMMUNICATE: 1.0, DB: 0.0)                                │
-│                                                                              │
-│ DB Check:❌ 0.0                                                              │
-│                                                                              │
-│ Action Checks:                                                               │
-│ - 0: book_reservation ❌ 0.0                                                 │
-│                                                                              │
-│ Additional Info:                                                             │
-│ env: None                                                                    │
-│ nl: None                                                                     │
-│ communicate: {'note': 'No communicate_info to evaluate'}                     │
-│ action: None                                                                 │
-│                                                                              │
-╰──────────────────────────────────────────────────────────────────────────────╯
-25/30 (trial 1/1). Running task 25, trial 1
+22/30 (trial 1/1). Running task 22, trial 1
 ╭──────────────────────────── Simulation Overview ─────────────────────────────╮
 │ Task ID: 22                                                                  │
 │ Trial: 0                                                                     │
-│ Duration: 282.97s                                                            │
+│ Duration: 54.51s                                                             │
 │ Termination Reason: TerminationReason.USER_STOP                              │
-│ Agent Cost: $0.0742                                                          │
-│ User Cost: $0.0008                                                           │
+│ Agent Cost: $0.0212                                                          │
+│ User Cost: $0.0002                                                           │
 │ Reward: ❌ 0.0000 (COMMUNICATE: 1.0, DB: 0.0)                                │
 │                                                                              │
 │ DB Check:❌ 0.0                                                              │
@@ -579,14 +524,14 @@
 │ action: None                                                                 │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-26/30 (trial 1/1). Running task 26, trial 1
+23/30 (trial 1/1). Running task 23, trial 1
 ╭──────────────────────────── Simulation Overview ─────────────────────────────╮
-│ Task ID: 25                                                                  │
+│ Task ID: 20                                                                  │
 │ Trial: 0                                                                     │
-│ Duration: 298.96s                                                            │
+│ Duration: 296.61s                                                            │
 │ Termination Reason: TerminationReason.USER_STOP                              │
-│ Agent Cost: $0.0716                                                          │
-│ User Cost: $0.0009                                                           │
+│ Agent Cost: $0.0754                                                          │
+│ User Cost: $0.0008                                                           │
 │ Reward: ❌ 0.0000 (COMMUNICATE: 1.0, DB: 0.0)                                │
 │                                                                              │
 │ DB Check:❌ 0.0                                                              │
@@ -601,13 +546,49 @@
 │ action: None                                                                 │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-27/30 (trial 1/1). Running task 27, trial 1
+24/30 (trial 1/1). Running task 24, trial 1
+╭──────────────────────────── Simulation Overview ─────────────────────────────╮
+│ Task ID: 14                                                                  │
+│ Trial: 0                                                                     │
+│ Duration: 835.07s                                                            │
+│ Termination Reason: TerminationReason.TASK_TIMEOUT                           │
+│ Agent Cost: $0.2580                                                          │
+│ User Cost: $0.0029                                                           │
+│ Reward: ❌ 0.0000 ()                                                         │
+│                                                                              │
+│ Additional Info:                                                             │
+│ note: Simulation terminated prematurely. Termination reason: task_timeout    │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+25/30 (trial 1/1). Running task 25, trial 1
+╭──────────────────────────── Simulation Overview ─────────────────────────────╮
+│ Task ID: 24                                                                  │
+│ Trial: 0                                                                     │
+│ Duration: 338.85s                                                            │
+│ Termination Reason: TerminationReason.USER_STOP                              │
+│ Agent Cost: $0.0888                                                          │
+│ User Cost: $0.0011                                                           │
+│ Reward: ❌ 0.0000 (COMMUNICATE: 1.0, DB: 0.0)                                │
+│                                                                              │
+│ DB Check:❌ 0.0                                                              │
+│                                                                              │
+│ Action Checks:                                                               │
+│ - 0: book_reservation ❌ 0.0                                                 │
+│                                                                              │
+│ Additional Info:                                                             │
+│ env: None                                                                    │
+│ nl: None                                                                     │
+│ communicate: {'note': 'No communicate_info to evaluate'}                     │
+│ action: None                                                                 │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+26/30 (trial 1/1). Running task 26, trial 1
 ╭──────────────────────────── Simulation Overview ─────────────────────────────╮
 │ Task ID: 26                                                                  │
 │ Trial: 0                                                                     │
-│ Duration: 146.52s                                                            │
+│ Duration: 144.39s                                                            │
 │ Termination Reason: TerminationReason.USER_STOP                              │
-│ Agent Cost: $0.0385                                                          │
+│ Agent Cost: $0.0387                                                          │
 │ User Cost: $0.0003                                                           │
 │ Reward: ✅ 1.0000 (COMMUNICATE: 1.0, DB: 1.0)                                │
 │                                                                              │
@@ -620,14 +601,14 @@
 │ action: {'note': 'No actions to evaluate'}                                   │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-28/30 (trial 1/1). Running task 28, trial 1
+27/30 (trial 1/1). Running task 27, trial 1
 ╭──────────────────────────── Simulation Overview ─────────────────────────────╮
 │ Task ID: 23                                                                  │
 │ Trial: 0                                                                     │
-│ Duration: 462.83s                                                            │
+│ Duration: 654.95s                                                            │
 │ Termination Reason: TerminationReason.USER_STOP                              │
-│ Agent Cost: $0.1125                                                          │
-│ User Cost: $0.0016                                                           │
+│ Agent Cost: $0.2068                                                          │
+│ User Cost: $0.0025                                                           │
 │ Reward: ❌ 0.0000 (COMMUNICATE: 0.0, DB: 0.0)                                │
 │                                                                              │
 │ DB Check:❌ 0.0                                                              │
@@ -650,32 +631,36 @@
 │ action: None                                                                 │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-29/30 (trial 1/1). Running task 29, trial 1
+28/30 (trial 1/1). Running task 28, trial 1
 ╭──────────────────────────── Simulation Overview ─────────────────────────────╮
-│ Task ID: 28                                                                  │
+│ Task ID: 25                                                                  │
 │ Trial: 0                                                                     │
-│ Duration: 128.71s                                                            │
+│ Duration: 368.16s                                                            │
 │ Termination Reason: TerminationReason.USER_STOP                              │
-│ Agent Cost: $0.0311                                                          │
-│ User Cost: $0.0004                                                           │
-│ Reward: ✅ 1.0000 (COMMUNICATE: 1.0, DB: 1.0)                                │
+│ Agent Cost: $0.0804                                                          │
+│ User Cost: $0.0012                                                           │
+│ Reward: ❌ 0.0000 (COMMUNICATE: 1.0, DB: 0.0)                                │
 │                                                                              │
-│ DB Check:✅ 1.0                                                              │
+│ DB Check:❌ 0.0                                                              │
+│                                                                              │
+│ Action Checks:                                                               │
+│ - 0: book_reservation ❌ 0.0                                                 │
 │                                                                              │
 │ Additional Info:                                                             │
 │ env: None                                                                    │
 │ nl: None                                                                     │
 │ communicate: {'note': 'No communicate_info to evaluate'}                     │
-│ action: {'note': 'No actions to evaluate'}                                   │
+│ action: None                                                                 │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
+29/30 (trial 1/1). Running task 29, trial 1
 ╭──────────────────────────── Simulation Overview ─────────────────────────────╮
 │ Task ID: 27                                                                  │
 │ Trial: 0                                                                     │
-│ Duration: 144.45s                                                            │
+│ Duration: 142.28s                                                            │
 │ Termination Reason: TerminationReason.USER_STOP                              │
-│ Agent Cost: $0.0286                                                          │
-│ User Cost: $0.0004                                                           │
+│ Agent Cost: $0.0285                                                          │
+│ User Cost: $0.0003                                                           │
 │ Reward: ❌ 0.0000 (COMMUNICATE: 1.0, DB: 0.0)                                │
 │                                                                              │
 │ DB Check:❌ 0.0                                                              │
@@ -692,12 +677,30 @@
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭──────────────────────────── Simulation Overview ─────────────────────────────╮
+│ Task ID: 28                                                                  │
+│ Trial: 0                                                                     │
+│ Duration: 136.44s                                                            │
+│ Termination Reason: TerminationReason.USER_STOP                              │
+│ Agent Cost: $0.0396                                                          │
+│ User Cost: $0.0005                                                           │
+│ Reward: ✅ 1.0000 (COMMUNICATE: 1.0, DB: 1.0)                                │
+│                                                                              │
+│ DB Check:✅ 1.0                                                              │
+│                                                                              │
+│ Additional Info:                                                             │
+│ env: None                                                                    │
+│ nl: None                                                                     │
+│ communicate: {'note': 'No communicate_info to evaluate'}                     │
+│ action: {'note': 'No actions to evaluate'}                                   │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭──────────────────────────── Simulation Overview ─────────────────────────────╮
 │ Task ID: 29                                                                  │
 │ Trial: 0                                                                     │
-│ Duration: 332.81s                                                            │
+│ Duration: 294.33s                                                            │
 │ Termination Reason: TerminationReason.USER_STOP                              │
-│ Agent Cost: $0.2216                                                          │
-│ User Cost: $0.0028                                                           │
+│ Agent Cost: $0.1374                                                          │
+│ User Cost: $0.0017                                                           │
 │ Reward: ❌ 0.0000 (COMMUNICATE: 1.0, DB: 0.0)                                │
 │                                                                              │
 │ DB Check:❌ 0.0                                                              │
@@ -718,12 +721,12 @@
 ✨ Successfully completed all simulations!
 To review the simulations, run: tau2 view
 ╭─────────────────────────────── Agent Metrics ────────────────────────────────╮
-│ 🏆 Average Reward: 0.3333                                                    │
+│ 🏆 Average Reward: 0.2667                                                    │
 │                                                                              │
 │ 📈 Pass^k Metrics:                                                           │
-│ k=1: 0.333                                                                   │
+│ k=1: 0.267                                                                   │
 │                                                                              │
-│ 💰 Average Cost per Conversation: $0.1004                                    │
+│ 💰 Average Cost per Conversation: $0.1118                                    │
 │                                                                              │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
