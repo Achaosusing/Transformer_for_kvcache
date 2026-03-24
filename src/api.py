@@ -112,6 +112,61 @@ class OracleKVProjectAPI:
 
         return generated_ids, traces
 
+    def _generate_with_streaming_cache(
+        self,
+        token_ids: list[int],
+        policy: Any,
+        max_new_tokens: int,
+        temperature: float,
+        top_p: float,
+        stop_on_eos: bool,
+        save_step_trace: bool,
+        prompt_len: int,
+    ) -> tuple[list[int], list[StepTrace]]:
+        cache_budget = policy.cache_budget
+
+        cached_logits, past_key_values = self.model.prefill_next_token_logits(token_ids)
+
+        generated_ids: list[int] = []
+        traces: list[StepTrace] = []
+        active_token_count = len(token_ids)
+        eos_token_id = self.model.tokenizer.eos_token_id
+
+        for step in range(max_new_tokens):
+            if save_step_trace:
+                traces.append(
+                    StepTrace(
+                        step=step,
+                        full_context_tokens=prompt_len + len(generated_ids),
+                        kept_tokens=active_token_count,
+                        kept_ratio=active_token_count / max(prompt_len + len(generated_ids), 1),
+                    )
+                )
+
+            next_id = self.model.sample_next_token(cached_logits, temperature, top_p)
+            generated_ids.append(next_id)
+
+            if stop_on_eos and eos_token_id is not None and next_id == eos_token_id:
+                break
+
+            next_total = active_token_count + 1
+            if next_total > cache_budget:
+                keep_idx = policy.select_keep_indices(
+                    next_total,
+                    np.zeros(next_total, dtype=np.float64),
+                )
+                existing_keep = [i for i in keep_idx if i < active_token_count]
+                past_key_values = self.model.prune_past_key_values(past_key_values, existing_keep)
+                active_token_count = len(existing_keep)
+
+            cached_logits, past_key_values = self.model.next_token_logits_from_cache(
+                next_id,
+                past_key_values,
+            )
+            active_token_count += 1
+
+        return generated_ids, traces
+
     def _generate_with_h2o(
         self,
         token_ids: list[int],
@@ -190,7 +245,7 @@ class OracleKVProjectAPI:
         methods: list[str],
         method_configs: dict[str, dict[str, Any]] | None = None,
         *,
-        max_new_tokens: int = 128,
+        max_new_tokens: int = 1024,
         temperature: float = 0.0,
         top_p: float = 1.0,
         stop_on_eos: bool = True,
@@ -225,22 +280,31 @@ class OracleKVProjectAPI:
                     t0 = time.perf_counter()
                     if method_key == "baseline":
                         pruned_ids = full_ids
+                        generated_ids, traces = self._generate_with_manual_cache(
+                            token_ids=pruned_ids,
+                            max_new_tokens=max_new_tokens,
+                            temperature=temperature,
+                            top_p=top_p,
+                            stop_on_eos=stop_on_eos,
+                            save_step_trace=save_step_trace,
+                            full_context_tokens=len(full_ids),
+                        )
                     else:
                         keep_idx = policy.select_keep_indices(
                             len(full_ids),
                             np.zeros(len(full_ids), dtype=np.float64),
                         )
                         pruned_ids = [full_ids[i] for i in keep_idx]
-
-                    generated_ids, traces = self._generate_with_manual_cache(
-                        token_ids=pruned_ids,
-                        max_new_tokens=max_new_tokens,
-                        temperature=temperature,
-                        top_p=top_p,
-                        stop_on_eos=stop_on_eos,
-                        save_step_trace=save_step_trace,
-                        full_context_tokens=len(full_ids),
-                    )
+                        generated_ids, traces = self._generate_with_streaming_cache(
+                            token_ids=pruned_ids,
+                            policy=policy,
+                            max_new_tokens=max_new_tokens,
+                            temperature=temperature,
+                            top_p=top_p,
+                            stop_on_eos=stop_on_eos,
+                            save_step_trace=save_step_trace,
+                            prompt_len=prompt_len,
+                        )
                     elapsed = time.perf_counter() - t0
                 else:
                     t0 = time.perf_counter()

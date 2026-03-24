@@ -17,7 +17,7 @@ class EvalRequest(BaseModel):
     samples: list[dict[str, Any]] = Field(default_factory=list)
     methods: list[str] | None = None
     method_configs: dict[str, dict[str, Any]] | None = None
-    max_new_tokens: int = 128
+    max_new_tokens: int | None = Field(default=None, gt=0)
     temperature: float = 0.0
     top_p: float = 1.0
     stop_on_eos: bool = True
@@ -33,7 +33,7 @@ class ChatMessage(BaseModel):
 class ChatCompletionRequest(BaseModel):
     model: str | None = None
     messages: list[ChatMessage]
-    max_tokens: int = 128
+    max_tokens: int | None = Field(default=None, gt=0)
     temperature: float = 0.0
     top_p: float = 1.0
     stream: bool = False
@@ -46,7 +46,7 @@ class ChatCompletionRequest(BaseModel):
 class CompletionRequest(BaseModel):
     model: str | None = None
     prompt: str
-    max_tokens: int = 128
+    max_tokens: int | None = Field(default=None, gt=0)
     temperature: float = 0.0
     top_p: float = 1.0
     stream: bool = False
@@ -78,6 +78,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--h2o-sink-size", type=int, default=4)
     parser.add_argument("--h2o-local-window-size", type=int, default=256)
     parser.add_argument("--h2o-heavy-hitter-size", type=int, default=128)
+    parser.add_argument("--max-new-tokens", type=int, default=1024)
     return parser
 
 
@@ -119,11 +120,12 @@ def main() -> None:
         req_method_configs = req.method_configs or {}
         if fixed_method and fixed_method_configs and fixed_method not in req_method_configs:
             req_method_configs = {**req_method_configs, **fixed_method_configs}
+        max_new_tokens = req.max_new_tokens if req.max_new_tokens is not None else args.max_new_tokens
         return evaluator.evaluate(
             samples=req.samples,
             methods=methods,
             method_configs=req_method_configs,
-            max_new_tokens=req.max_new_tokens,
+            max_new_tokens=max_new_tokens,
             temperature=req.temperature,
             top_p=req.top_p,
             stop_on_eos=req.stop_on_eos,
@@ -159,11 +161,12 @@ def main() -> None:
             "id": "chat_0",
             "messages": [m.model_dump() for m in req.messages],
         }
+        max_new_tokens = req.max_tokens if req.max_tokens is not None else args.max_new_tokens
         result = evaluator.evaluate(
             samples=[sample],
             methods=methods,
             method_configs=req_method_configs,
-            max_new_tokens=req.max_tokens,
+            max_new_tokens=max_new_tokens,
             temperature=req.temperature,
             top_p=req.top_p,
             stop_on_eos=True,
@@ -220,11 +223,12 @@ def main() -> None:
             "id": "completion_0",
             "prompt": req.prompt,
         }
+        max_new_tokens = req.max_tokens if req.max_tokens is not None else args.max_new_tokens
         result = evaluator.evaluate(
             samples=[sample],
             methods=methods,
             method_configs=req_method_configs,
-            max_new_tokens=req.max_tokens,
+            max_new_tokens=max_new_tokens,
             temperature=req.temperature,
             top_p=req.top_p,
             stop_on_eos=True,

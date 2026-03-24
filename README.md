@@ -134,7 +134,7 @@ api = OracleKVProjectAPI(
 ## KV Cache 说明
 
 - baseline: 使用手写逐步缓存解码，KV cache 不裁剪。
-- streamingLLM: 使用手写逐步缓存解码；仅在进入生成前保留 Sink Tokens + Recent Tokens。
+- streamingLLM: 使用手写逐步缓存解码；在进入生成前保留 Sink Tokens + Recent Tokens，在生成过程中持续以滑动窗口方式裁剪 cache，cache 大小保持在 `sink_size + local_window_size` 以内。
 - h2o: 以 streamingLLM 为基础，额外维护 Heavy Hitters。每个缓存 token 有一个 score 计数器，按每步解码时的注意力权重累计更新；当缓存超过预算时，仅在非 sink、非 recent 的普通 token 中淘汰累计得分最低者。
 
 ## 离线推理
@@ -266,3 +266,71 @@ python offline_infer.py \
 - 数据格式：--dataset-format jsonl/tau2
 - streamingLLM 参数：--streaming-sink-size、--streaming-local-window-size
 - h2o 参数：--h2o-sink-size、--h2o-local-window-size、--h2o-heavy-hitter-size
+
+## tau2-bench 压力测试
+
+### 脚本
+
+项目提供三个评测脚本：
+
+| 脚本 | 用途 |
+|------|------|
+| `scripts/run_tau2_offline_sequential.sh` | 单 GPU 顺序评测 baseline → streamingllm → h2o |
+| `scripts/run_tau2_offline_parallel_multi_gpu.sh` | 多 GPU 并行评测 |
+| `scripts/run_tau2_stress_test.sh` | 多窗口参数压力测试（推荐） |
+
+### 压力测试
+
+```bash
+# 全部 7 组配置（baseline + streamingllm + h2o×5）
+bash scripts/run_tau2_stress_test.sh
+
+# Phase 1：baseline + streamingllm(heavy=0) + h2o(heavy=64) 三方核心对比
+PHASE=1 bash scripts/run_tau2_stress_test.sh
+
+# Phase 2：h2o heavy 小预算扫描（heavy=32, 128）
+PHASE=2 bash scripts/run_tau2_stress_test.sh
+
+# Phase 3：h2o heavy 大预算扫描（heavy=256, 512）
+PHASE=3 bash scripts/run_tau2_stress_test.sh
+```
+
+参数网格（window 固定，扫描 heavy-hitter 大小）：
+
+| 方法 | sink | window(固定) | heavy | cache 预算 |
+|------|------|------------|-------|-----------|
+| baseline | - | - | - | 无限制 |
+| streamingllm | 4 | 128 | 0 | 132 ← 下界参考 |
+| h2o | 4 | 128 | 32 | 164 |
+| h2o | 4 | 128 | 64 | 196 |
+| h2o | 4 | 128 | 128 | 260 |
+| h2o | 4 | 128 | 256 | 388 |
+| h2o | 4 | 128 | 512 | 644 ← 趋近 baseline |
+
+可通过环境变量覆盖：
+
+```bash
+# 更换 window 大小（所有配置统一更换）
+WINDOW_SIZE=256 bash scripts/run_tau2_stress_test.sh
+
+# 完整覆盖示例
+GPU_A=0 GPU_B=1 GPU_C=2 \
+NUM_TASKS=30 \
+WINDOW_SIZE=128 \
+AGENT_MAX_TOKENS=512 \
+SINK_SIZE=4 \
+bash scripts/run_tau2_stress_test.sh
+```
+
+### max_tokens 建议
+
+tau2-bench 中 agent 需要生成：
+- 工具调用 JSON（30-100 tokens）
+- 自然语言回复（100-300 tokens）
+- 复杂策略解释（200-500 tokens）
+
+默认 `max_tokens=128` 容易导致回复被截断。建议：
+
+- **tau2-bench 压力测试**：使用 512（脚本默认值）
+- **快速 smoke test**：使用 256
+- **通用离线推理**：根据任务长度自定义

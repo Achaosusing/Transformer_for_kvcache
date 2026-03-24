@@ -59,7 +59,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=["baseline", "streamingllm", "h2o"],
         choices=["baseline", "streamingllm", "streaming_llm", "h2o"],
     )
-    parser.add_argument("--max-new-tokens", type=int, default=128)
+    parser.add_argument("--max-new-tokens", type=int, default=1024)
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--top-p", type=float, default=1.0)
     parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")

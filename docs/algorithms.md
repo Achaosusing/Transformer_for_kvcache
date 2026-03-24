@@ -26,9 +26,10 @@
    - 使用 `past_key_values` 做一次增量前向
    - 更新 logits 和 cache
 
-在代码里，这个统一框架分成两条路径：
+在代码里，这个统一框架分成三条路径：
 
-- baseline 和 streamingLLM：`OracleKVProjectAPI._generate_with_manual_cache`
+- baseline：`OracleKVProjectAPI._generate_with_manual_cache`
+- streamingLLM：`OracleKVProjectAPI._generate_with_streaming_cache`
 - h2o：`OracleKVProjectAPI._generate_with_h2o`
 
 两条路径的共同点是：
@@ -36,8 +37,9 @@
 1. 都使用 `prefill_next_token_logits(...)` 或它的 attention 版来初始化 cache。
 2. 都使用 `next_token_logits_from_cache(...)` 或它的 attention 版进行增量解码。
 3. 都调用同一个 `sample_next_token(...)` 做采样。
+4. streamingLLM 和 h2o 都在解码过程中持续维护 cache 预算约束。
 
-因此三者在模型、采样逻辑、增量缓存使用方式上保持同一大框架，主要差异集中在“哪些 token 被保留在 KV Cache 中”。
+因此三者在模型、采样逻辑、增量缓存使用方式上保持同一大框架，主要差异集中在"哪些 token 被保留在 KV Cache 中"以及"如何决定淘汰哪些 token"。
 
 ## 2. baseline
 
@@ -128,13 +130,14 @@ $$
 
 1. 对 `full_ids` 调用 policy 选出初始 `keep_idx`
 2. 生成 `pruned_ids = [full_ids[i] for i in keep_idx]`
-3. 将 `pruned_ids` 送入 `_generate_with_manual_cache(...)`
+3. 将 `pruned_ids` 送入 `_generate_with_streaming_cache(...)`
 
-这里要注意：
+执行细节：
 
-1. streamingLLM 当前实现只对初始 prompt 做一次静态裁剪。
-2. 进入逐步解码后，新生成 token 会继续追加进 cache。
-3. 它不会像 h2o 那样在解码过程中持续做淘汰决策。
+1. streamingLLM 先对初始 prompt 做一次静态裁剪，保留 sink + recent window 内的 token。
+2. 进入逐步解码后，每步检查 cache 是否超出预算（`cache_budget = sink_size + local_window_size`）。
+3. 若超出预算，调用 `select_keep_indices(...)` 裁剪 cache，丢弃最旧的非 sink token，只保留 sink 和最近的 window 内 token。
+4. 这使得 streamingLLM 的 cache 大小在整个生成过程中保持稳定，与 h2o 一样受预算约束。
 
 ### 3.4 特点
 
@@ -288,20 +291,20 @@ $$
 ### 5.2 动态性对比
 
 1. baseline：无动态裁剪
-2. streamingLLM：仅初始静态裁剪
-3. h2o：解码过程中动态维护和裁剪 cache
+2. streamingLLM：解码过程中持续滑动窗口裁剪（仅基于位置）
+3. h2o：解码过程中动态维护和裁剪 cache（基于位置 + 注意力得分）
 
 ### 5.3 对实现开销的影响
 
 1. baseline：实现最简单，cache 最大
-2. streamingLLM：实现简单，初始 cache 更小
+2. streamingLLM：实现较简单，cache 受预算约束（需要 cache 裁剪但无需 attention 聚合）
 3. h2o：实现最复杂，需要 attention 聚合、score 累计和 cache 剪枝
 
 ## 6. 当前实现边界
 
 当前项目的 h2o 已经是在线缓存管理版本，但仍有一些边界需要明确：
 
-1. streamingLLM 目前只在 prompt 阶段裁剪一次，不会在生成过程中继续滑动裁剪。
+1. streamingLLM 在 prompt 阶段和生成阶段都做滑动窗口裁剪，cache 大小保持在 `sink_size + local_window_size` 以内。
 2. h2o 的分数只来源于模型返回的 attention，不额外引入其他启发式信号。
 3. 三种方法已经统一到同一类手写逐步解码框架，但 h2o 为了实现 score 计数器，仍然必须额外读取 attention。
 

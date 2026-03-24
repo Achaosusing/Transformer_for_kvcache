@@ -250,10 +250,19 @@ class LocalTransformerModel:
         return out.logits[0, -1, :].float(), out.past_key_values, attention_scores
 
     @staticmethod
-    def _prune_cache_tensor(cache_tensor: torch.Tensor, keep_indices: torch.Tensor) -> torch.Tensor:
+    def _prune_cache_tensor(cache_tensor: Any, keep_indices: torch.Tensor) -> Any:
+        # Some model backends leave selected cache slots as None.
+        if cache_tensor is None:
+            return None
+        if not torch.is_tensor(cache_tensor):
+            raise TypeError(f"Unsupported cache tensor type: {type(cache_tensor)}")
         if cache_tensor.ndim < 3:
             raise ValueError("Unsupported cache tensor rank")
-        return cache_tensor.index_select(2, keep_indices.to(device=cache_tensor.device, dtype=torch.long))
+
+        keep = keep_indices.to(device=cache_tensor.device, dtype=torch.long)
+        if keep.numel() > 0:
+            keep = keep[(keep >= 0) & (keep < cache_tensor.shape[2])]
+        return cache_tensor.index_select(2, keep)
 
     def prune_past_key_values(
         self,

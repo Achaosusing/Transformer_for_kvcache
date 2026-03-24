@@ -20,11 +20,13 @@ TASK_TIMEOUT_SECONDS="${TASK_TIMEOUT_SECONDS:-800}"
 MAX_CONCURRENCY="${MAX_CONCURRENCY:-3}"
 NUM_TRIALS="${NUM_TRIALS:-1}"
 NUM_TASKS="${NUM_TASKS:-50}"
+ENABLE_AGENT_MAX_TOKENS="${ENABLE_AGENT_MAX_TOKENS:-1}"
+AGENT_MAX_TOKENS="${AGENT_MAX_TOKENS:-1024}"
 STREAMING_SINK_SIZE="${STREAMING_SINK_SIZE:-4}"
-STREAMING_LOCAL_WINDOW_SIZE="${STREAMING_LOCAL_WINDOW_SIZE:-256}"
+STREAMING_LOCAL_WINDOW_SIZE="${STREAMING_LOCAL_WINDOW_SIZE:-128}"
 H2O_SINK_SIZE="${H2O_SINK_SIZE:-4}"
-H2O_LOCAL_WINDOW_SIZE="${H2O_LOCAL_WINDOW_SIZE:-256}"
-H2O_HEAVY_HITTER_SIZE="${H2O_HEAVY_HITTER_SIZE:-128}"
+H2O_LOCAL_WINDOW_SIZE="${H2O_LOCAL_WINDOW_SIZE:-128}"
+H2O_HEAVY_HITTER_SIZE="${H2O_HEAVY_HITTER_SIZE:-64}"
 PORT_BASELINE="${PORT_BASELINE:-8000}"
 PORT_STREAMINGLLM="${PORT_STREAMINGLLM:-8001}"
 PORT_H2O="${PORT_H2O:-8002}"
@@ -52,6 +54,16 @@ fi
 
 if [[ -z "${DEEPSEEK_API_KEY:-}" ]]; then
   echo "[WARN] DEEPSEEK_API_KEY is empty. user-llm=$USER_LLM may fail if key is required."
+fi
+
+if [[ "$ENABLE_AGENT_MAX_TOKENS" != "0" && "$ENABLE_AGENT_MAX_TOKENS" != "1" ]]; then
+  echo "[error] ENABLE_AGENT_MAX_TOKENS must be 0 or 1"
+  exit 1
+fi
+
+if [[ "$ENABLE_AGENT_MAX_TOKENS" == "1" ]] && [[ ! "$AGENT_MAX_TOKENS" =~ ^[1-9][0-9]*$ ]]; then
+  echo "[error] AGENT_MAX_TOKENS must be a positive integer when ENABLE_AGENT_MAX_TOKENS=1"
+  exit 1
 fi
 
 TAU2_SRC_DIR="$ROOT_DIR/tau2-bench/src"
@@ -148,13 +160,20 @@ run_one_method() {
     tau2_extra_args+=(--num-tasks "$NUM_TASKS")
   fi
 
+  local agent_llm_args
+  if [[ "$ENABLE_AGENT_MAX_TOKENS" == "1" ]]; then
+    agent_llm_args=$(printf '{"api_base":"http://%s:%s/v1","api_key":"EMPTY","temperature":0.0,"max_tokens":%s}' "$HOST" "$port" "$AGENT_MAX_TOKENS")
+  else
+    agent_llm_args=$(printf '{"api_base":"http://%s:%s/v1","api_key":"EMPTY","temperature":0.0}' "$HOST" "$port")
+  fi
+
   echo "[run] tau2 eval for method=$method"
   "${TAU2_CMD[@]}" run \
     --domain "$DOMAIN" \
     --task-split-name "$TASK_SPLIT" \
     --agent-llm "$AGENT_LLM" \
     --user-llm "$USER_LLM" \
-    --agent-llm-args "{\"api_base\":\"http://${HOST}:${port}/v1\",\"api_key\":\"EMPTY\",\"temperature\":0.0}" \
+    --agent-llm-args "$agent_llm_args" \
     --user-llm-args '{"temperature":0.0}' \
     --task-timeout-seconds "$TASK_TIMEOUT_SECONDS" \
     --max-concurrency "$MAX_CONCURRENCY" \
@@ -168,6 +187,7 @@ run_one_method() {
 echo "[config] baseline: gpu=$GPU_BASELINE port=$PORT_BASELINE"
 echo "[config] streamingllm: gpu=$GPU_STREAMINGLLM port=$PORT_STREAMINGLLM sink=$STREAMING_SINK_SIZE local=$STREAMING_LOCAL_WINDOW_SIZE"
 echo "[config] h2o: gpu=$GPU_H2O port=$PORT_H2O sink=$H2O_SINK_SIZE local=$H2O_LOCAL_WINDOW_SIZE heavy=$H2O_HEAVY_HITTER_SIZE"
+echo "[config] agent max_tokens enabled=$ENABLE_AGENT_MAX_TOKENS value=$AGENT_MAX_TOKENS"
 echo "[config] save baseline=$SAVE_TO_BASELINE"
 echo "[config] save streamingllm=$SAVE_TO_STREAMINGLLM"
 echo "[config] save h2o=$SAVE_TO_H2O"

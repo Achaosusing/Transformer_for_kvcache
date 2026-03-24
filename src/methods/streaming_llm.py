@@ -13,6 +13,7 @@ class StreamingLLMPolicy:
             raise ValueError("local_window_size must be > 0")
         self.sink_size = sink_size
         self.local_window_size = local_window_size
+        self.cache_budget = sink_size + local_window_size
 
     def select_keep_indices(
         self,

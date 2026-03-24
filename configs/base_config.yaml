@@ -11,7 +11,7 @@ model:
 
 runtime:
   max_input_tokens: null
-  max_new_tokens: 128
+  max_new_tokens: 1024
   temperature: 0.0
   top_p: 1.0
   stop_on_eos: true

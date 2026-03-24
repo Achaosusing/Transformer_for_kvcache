@@ -23,6 +23,8 @@ TASK_TIMEOUT_SECONDS=800
 MAX_CONCURRENCY="${MAX_CONCURRENCY:-3}"
 NUM_TRIALS="${NUM_TRIALS:-3}"
 NUM_TASKS="${NUM_TASKS:-10}"
+ENABLE_AGENT_MAX_TOKENS="${ENABLE_AGENT_MAX_TOKENS:-1}"
+AGENT_MAX_TOKENS="${AGENT_MAX_TOKENS:-1024}"
 STREAMING_SINK_SIZE="${STREAMING_SINK_SIZE:-4}"
 STREAMING_LOCAL_WINDOW_SIZE="${STREAMING_LOCAL_WINDOW_SIZE:-256}"
 H2O_SINK_SIZE="${H2O_SINK_SIZE:-4}"
@@ -49,6 +51,30 @@ fi
 
 if [[ -z "${DEEPSEEK_API_KEY:-}" ]]; then
   echo "[WARN] DEEPSEEK_API_KEY is empty. user-llm=$USER_LLM may fail if key is required."
+fi
+
+if [[ "$ENABLE_AGENT_MAX_TOKENS" != "0" && "$ENABLE_AGENT_MAX_TOKENS" != "1" ]]; then
+  echo "[error] ENABLE_AGENT_MAX_TOKENS must be 0 or 1"
+  exit 1
+fi
+
+if [[ "$ENABLE_AGENT_MAX_TOKENS" == "1" ]] && [[ ! "$AGENT_MAX_TOKENS" =~ ^[1-9][0-9]*$ ]]; then
+  echo "[error] AGENT_MAX_TOKENS must be a positive integer when ENABLE_AGENT_MAX_TOKENS=1"
+  exit 1
+fi
+
+TAU2_SRC_DIR="$ROOT_DIR/tau2-bench/src"
+if command -v tau2 >/dev/null 2>&1; then
+  TAU2_CMD=(tau2)
+  echo "[info] using tau2 from PATH"
+elif [[ -d "$TAU2_SRC_DIR/tau2" ]]; then
+  export PYTHONPATH="$TAU2_SRC_DIR${PYTHONPATH:+:$PYTHONPATH}"
+  TAU2_CMD=(python -m tau2.cli)
+  echo "[info] tau2 command not found; fallback to python -m tau2.cli"
+else
+  echo "[error] tau2 not found in PATH and local source missing at $TAU2_SRC_DIR"
+  echo "[hint] install with: cd tau2-bench && pip install -e ."
+  exit 1
 fi
 
 cleanup_pid=""
@@ -119,19 +145,27 @@ run_one_method() {
     return 1
   fi
 
+  local agent_llm_args
+  if [[ "$ENABLE_AGENT_MAX_TOKENS" == "1" ]]; then
+    agent_llm_args=$(printf '{"api_base":"http://%s:%s/v1","api_key":"EMPTY","temperature":0.0,"max_tokens":%s}' "$HOST" "$port" "$AGENT_MAX_TOKENS")
+  else
+    agent_llm_args=$(printf '{"api_base":"http://%s:%s/v1","api_key":"EMPTY","temperature":0.0}' "$HOST" "$port")
+  fi
+
   echo "[run] tau2 eval for method=$method"
-  tau2 run \
+  "${TAU2_CMD[@]}" run \
     --domain "$DOMAIN" \
     --task-split-name "$TASK_SPLIT" \
     --agent-llm "$AGENT_LLM" \
     --user-llm "$USER_LLM" \
-    --agent-llm-args "{\"api_base\":\"http://${HOST}:${port}/v1\",\"api_key\":\"EMPTY\",\"temperature\":0.0}" \
+    --agent-llm-args "$agent_llm_args" \
     --user-llm-args '{"temperature":0.0}' \
     --task-timeout-seconds "$TASK_TIMEOUT_SECONDS" \
     --max-concurrency "$MAX_CONCURRENCY" \
     --num-trials "$NUM_TRIALS" \
     --num-tasks "$NUM_TASKS" \
-    --save-to "$save_to"
+    --save-to "$save_to" \
+    >"./outputs/${save_to}_tau2.log" 2>&1
 
   echo "[stop] method=$method pid=$cleanup_pid"
   kill "$cleanup_pid" 2>/dev/null || true
@@ -143,6 +177,7 @@ run_one_method() {
 
 mkdir -p ./outputs
 
+echo "[config] agent max_tokens enabled=$ENABLE_AGENT_MAX_TOKENS value=$AGENT_MAX_TOKENS"
 echo "[config] save baseline=$SAVE_TO_BASELINE"
 echo "[config] save streamingllm=$SAVE_TO_STREAMINGLLM"
 echo "[config] save h2o=$SAVE_TO_H2O"
