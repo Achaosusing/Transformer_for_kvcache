@@ -1,0 +1,7 @@
+source_group,method,total_task_instances,total_correct,acc
+new10,baseline,40,37.0,0.925
+new10,h2o,190,158.0,0.8315789473684211
+new10,streamingllm,30,20.0,0.6666666666666666
+old30,baseline,40,40.0,1.0
+old30,h2o,250,218.0,0.872
+old30,streamingllm,70,51.0,0.7285714285714285

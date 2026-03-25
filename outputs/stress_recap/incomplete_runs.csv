@@ -1,0 +1,5 @@
+method,num_trials,expected_tasks,sink,window,heavy,total_budget,repeat,tag,cohort,source_file,actual_tasks,is_complete,success_rate,timeout_rate,avg_duration_s,avg_turns
+h2o,1,10,4.0,160.0,128.0,292.0,run1,task10,new10,stress_h2o_1x10_4_160_128_task10.json,7,False,1.0,0.0,124.418433501302,15.428571428571429
+h2o,1,10,4.0,160.0,256.0,420.0,run1,task10,new10,stress_h2o_1x10_4_160_256_task10.json,8,False,1.0,0.0,188.221424959891,18.5
+h2o,1,10,4.0,160.0,32.0,196.0,run1,task10,new10,stress_h2o_1x10_4_160_32_task10.json,7,False,1.0,0.0,199.61320914200041,20.285714285714285
+streamingllm,1,10,4.0,64.0,0.0,68.0,run1,task10,new10,stress_streamingllm_1x10_4_64_task10.json,9,False,0.3333333333333333,0.6666666666666666,636.7140447190936,24.88888888888889

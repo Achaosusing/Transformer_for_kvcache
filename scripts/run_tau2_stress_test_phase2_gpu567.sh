@@ -35,11 +35,13 @@ NUM_TASKS="${NUM_TASKS:-30}"
 AGENT_MAX_TOKENS="${AGENT_MAX_TOKENS:-256}"
 EVICT_PERIOD="${EVICT_PERIOD:-16}"
 SINK_SIZE="${SINK_SIZE:-4}"
-WINDOW_SIZE="${WINDOW_SIZE:-128}"
+WINDOW_SIZE="${WINDOW_SIZE:-32}"
 GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.9}"
 DEVICE="${DEVICE:-cuda}"
 DTYPE="${DTYPE:-auto}"
 PHASE="${PHASE:-0}"  # 0=all, 1/2=specific phase
+TASK_IDS="${TASK_IDS:-}"
+TASK_TAG="${TASK_TAG:-}"
 
 # Phase 1 GPU assignments
 GPU_A="${GPU_A:-2}"
@@ -87,6 +89,23 @@ fi
 
 mkdir -p ./outputs
 
+declare -a TASK_ID_ARRAY=()
+SAVE_TO_SUFFIX=""
+
+if [[ -n "$TASK_IDS" ]]; then
+  normalized_task_ids="${TASK_IDS//,/ }"
+  read -r -a TASK_ID_ARRAY <<< "$normalized_task_ids"
+  if [[ "${#TASK_ID_ARRAY[@]}" -eq 0 ]]; then
+    echo "[error] TASK_IDS is set but no valid task ids were parsed"
+    exit 1
+  fi
+  TASK_TAG="${TASK_TAG:-subset}"
+  SAVE_TO_SUFFIX="_${TASK_TAG}"
+  if [[ "$NUM_TASKS" == "30" ]]; then
+    NUM_TASKS="${#TASK_ID_ARRAY[@]}"
+  fi
+fi
+
 wait_for_health() {
   local port="$1"
   local deadline=$((SECONDS + TIMEOUT_SECONDS))
@@ -112,20 +131,21 @@ run_config() {
 
   local save_to
   local -a method_extra_args=()
+  local -a tau2_selection_args=()
 
   case "$method" in
     baseline)
-      save_to="stress_baseline_${NUM_TRIALS}x${NUM_TASKS}"
+      save_to="stress_baseline_${NUM_TRIALS}x${NUM_TASKS}${SAVE_TO_SUFFIX}"
       ;;
     streamingllm)
-      save_to="stress_streamingllm_${NUM_TRIALS}x${NUM_TASKS}_${SINK_SIZE}_${WINDOW_SIZE}"
+      save_to="stress_streamingllm_${NUM_TRIALS}x${NUM_TASKS}_${SINK_SIZE}_${WINDOW_SIZE}${SAVE_TO_SUFFIX}"
       method_extra_args+=(
         --streaming-sink-size "$SINK_SIZE"
         --streaming-local-window-size "$WINDOW_SIZE"
       )
       ;;
     h2o)
-      save_to="stress_h2o_${NUM_TRIALS}x${NUM_TASKS}_${SINK_SIZE}_${WINDOW_SIZE}_${heavy}"
+      save_to="stress_h2o_${NUM_TRIALS}x${NUM_TASKS}_${SINK_SIZE}_${WINDOW_SIZE}_${heavy}${SAVE_TO_SUFFIX}"
       method_extra_args+=(
         --h2o-sink-size "$SINK_SIZE"
         --h2o-local-window-size "$WINDOW_SIZE"
@@ -133,6 +153,12 @@ run_config() {
       )
       ;;
   esac
+
+  if [[ "${#TASK_ID_ARRAY[@]}" -gt 0 ]]; then
+    tau2_selection_args+=(--task-ids "${TASK_ID_ARRAY[@]}")
+  else
+    tau2_selection_args+=(--num-tasks "$NUM_TASKS")
+  fi
 
   local server_pid=""
   cleanup_config() {
@@ -182,6 +208,7 @@ run_config() {
   "${TAU2_CMD[@]}" run \
     --domain "$DOMAIN" \
     --task-split-name "$TASK_SPLIT" \
+    "${tau2_selection_args[@]}" \
     --agent-llm "$AGENT_LLM" \
     --user-llm "$USER_LLM" \
     --agent-llm-args "$agent_llm_args" \
@@ -189,7 +216,6 @@ run_config() {
     --task-timeout-seconds "$TASK_TIMEOUT_SECONDS" \
     --max-concurrency "$MAX_CONCURRENCY" \
     --num-trials "$NUM_TRIALS" \
-    --num-tasks "$NUM_TASKS" \
     --save-to "$save_to" \
     >"./outputs/${save_to}_tau2.log" 2>&1
 
@@ -254,6 +280,9 @@ echo "H2O Heavy-Hitter Stress Test (Phase2 on GPU 5/6/7 variant)"
 echo "Model:    $MODEL_PATH"
 echo "Domain:   $DOMAIN  Split: $TASK_SPLIT"
 echo "Trials:   $NUM_TRIALS  Tasks: $NUM_TASKS"
+if [[ "${#TASK_ID_ARRAY[@]}" -gt 0 ]]; then
+  echo "Task IDs: ${TASK_ID_ARRAY[*]}"
+fi
 echo "Sink:     $SINK_SIZE   Window (fixed): $WINDOW_SIZE"
 echo "Agent max_tokens: $AGENT_MAX_TOKENS"
 echo "Evict period:  $EVICT_PERIOD"

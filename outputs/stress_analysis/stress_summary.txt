@@ -1,0 +1,28 @@
+tau2 stress-test summary
+baseline_unbounded_success=0.3333
+baseline_unbounded_timeout=0.0750
+
+streamingllm_by_budget:
+  budget=36 success=0.1333 timeout=0.4333 runs=1
+  budget=68 success=0.1333 timeout=0.3000 runs=1
+  budget=132 success=0.2000 timeout=0.1667 runs=1
+  budget=260 success=0.3000 timeout=0.0333 runs=1
+  budget=516 success=0.3000 timeout=0.0000 runs=2
+  budget=1028 success=0.3333 timeout=0.0000 runs=1
+
+best_h2o_by_budget:
+  budget=68 success=0.2000 timeout=0.2667 window=32 heavy=32
+  budget=100 success=0.2333 timeout=0.1333 window=64 heavy=32
+  budget=132 success=0.3000 timeout=0.1333 window=64 heavy=64
+  budget=164 success=0.2333 timeout=0.1000 window=128 heavy=32
+  budget=196 success=0.2667 timeout=0.1333 window=128 heavy=64
+  budget=260 success=0.3000 timeout=0.0333 window=128 heavy=128
+  budget=292 success=0.3333 timeout=0.0000 window=256 heavy=32
+  budget=324 success=0.3333 timeout=0.0000 window=256 heavy=64
+  budget=388 success=0.3333 timeout=0.0000 window=256 heavy=128
+  budget=516 success=0.3333 timeout=0.0333 window=256 heavy=256
+  budget=548 success=0.3167 timeout=0.0333 window=512 heavy=32
+  budget=580 success=0.3000 timeout=0.0167 window=512 heavy=64
+  budget=644 success=0.3333 timeout=0.0333 window=512 heavy=128
+  budget=772 success=0.3333 timeout=0.0167 window=512 heavy=256
+  budget=1092 success=0.3333 timeout=0.0333 window=1024 heavy=64

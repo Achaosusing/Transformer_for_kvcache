@@ -1,0 +1,4 @@
+method,total_task_instances,total_correct,acc
+baseline,80,77.0,0.9625
+h2o,440,376.0,0.8545454545454545
+streamingllm,100,71.0,0.71
