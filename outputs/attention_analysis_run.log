@@ -1,0 +1,105 @@
+[info] device=cuda  model=./local_models/Qwen3.5-0.8B
+`torch_dtype` is deprecated! Use `dtype` instead!
+The fast path is not available because one of the required library is not installed. Falling back to torch implementation. To install follow https://github.com/fla-org/flash-linear-attention#installation and https://github.com/Dao-AILab/causal-conv1d
+Loading weights:   0%|          | 0/320 [00:00<?, ?it/s]Loading weights: 100%|██████████| 320/320 [00:00<00:00, 5142.32it/s]
+[info] model loaded: 752M params
+[info] sim_file=tau2-bench/data/simulations/stress_baseline_1x30_1st.json
+[info] analysing 6 simulations
+
+[sim 1/6]  id=33a282d4  task=1  msgs=16
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=   95  spans= 3  attn_sum=1.0002
+  turn= 4  seq_len=  146  spans= 5  attn_sum=0.9999
+  turn= 6  seq_len=  234  spans= 7  attn_sum=1.0000
+  turn= 8  seq_len=  281  spans= 9  attn_sum=1.0000
+  turn=10  seq_len=  527  spans=11  attn_sum=1.0001
+  turn=12  seq_len=  834  spans=13  attn_sum=1.0000
+  turn=14  seq_len= 1117  spans=15  attn_sum=0.9998
+
+[sim 2/6]  id=f6855952  task=0  msgs=14
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=   71  spans= 3  attn_sum=0.9997
+  turn= 4  seq_len=  166  spans= 5  attn_sum=1.0001
+  turn= 6  seq_len=  253  spans= 7  attn_sum=0.9999
+  turn= 8  seq_len=  529  spans= 9  attn_sum=1.0001
+  turn=10  seq_len=  887  spans=11  attn_sum=1.0000
+  turn=12  seq_len= 1223  spans=13  attn_sum=1.0001
+
+[sim 3/6]  id=ea871dd1  task=2  msgs=24
+  turn= 4  seq_len=  136  spans= 5  attn_sum=1.0000
+  turn= 6  seq_len=  201  spans= 7  attn_sum=0.9999
+  turn= 8  seq_len=  283  spans= 9  attn_sum=1.0000
+  turn=10  seq_len=  404  spans=11  attn_sum=1.0000
+  turn=12  seq_len=  483  spans=13  attn_sum=0.9999
+  turn=14  seq_len=  537  spans=15  attn_sum=1.0000
+  turn=16  seq_len=  704  spans=17  attn_sum=1.0000
+  turn=18  seq_len= 1030  spans=19  attn_sum=0.9999
+  turn=20  seq_len= 1397  spans=21  attn_sum=1.0000
+  turn=22  seq_len= 1537  spans=23  attn_sum=1.0000
+
+[sim 4/6]  id=59e8ec77  task=3  msgs=12
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=   98  spans= 3  attn_sum=1.0001
+  turn= 4  seq_len=  150  spans= 5  attn_sum=0.9999
+  turn= 6  seq_len=  212  spans= 7  attn_sum=1.0001
+  turn= 8  seq_len=  382  spans= 9  attn_sum=0.9999
+  turn=10  seq_len=  486  spans=11  attn_sum=1.0001
+
+[sim 5/6]  id=4a3bb78f  task=4  msgs=16
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=  136  spans= 3  attn_sum=1.0000
+  turn= 4  seq_len=  228  spans= 5  attn_sum=0.9998
+  turn= 6  seq_len=  330  spans= 7  attn_sum=1.0000
+  turn= 8  seq_len=  384  spans= 9  attn_sum=1.0000
+  turn=10  seq_len=  579  spans=11  attn_sum=1.0001
+  turn=12  seq_len=  882  spans=13  attn_sum=1.0000
+  turn=14  seq_len=  970  spans=15  attn_sum=0.9998
+
+[sim 6/6]  id=26282b61  task=6  msgs=12
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=  116  spans= 3  attn_sum=1.0000
+  turn= 4  seq_len=  192  spans= 5  attn_sum=1.0000
+  turn= 6  seq_len=  241  spans= 7  attn_sum=1.0001
+  turn= 8  seq_len=  353  spans= 9  attn_sum=1.0000
+  turn=10  seq_len=  543  spans=11  attn_sum=0.9999
+
+[data] 384 records saved → outputs/attention_analysis/attention_by_role.csv
+
+======================================================================
+SUMMARY: average attention fraction by fine_role
+======================================================================
+                attn_frac_mean  attn_frac_std  attn_mean_mean  token_count_mean  n_spans
+fine_role                                                                               
+asst_gen              0.175519       0.147816        0.003319         79.600000      160
+asst_tool_call        0.122893       0.128099        0.002493         47.416667       12
+asst_greeting         0.086193       0.020499        0.009577          9.000000       40
+user_msg              0.040666       0.055443        0.001120         33.093023      172
+
+======================================================================
+SUMMARY: attention fraction decay by (fine_role, asst_turns_dist)
+(turn_dist=0 is current assistant turn, higher = older)
+======================================================================
+fine_role        asst_greeting  user_msg  asst_tool_call  asst_gen
+asst_turns_dist                                                   
+0                     0.000000  0.054125        0.316840  0.406232
+1                     0.133784  0.044840        0.110922  0.151668
+2                     0.090335  0.033174        0.058530  0.106432
+3                     0.074913  0.036111        0.044087  0.094937
+4                     0.081622  0.036560        0.029572  0.092463
+5                     0.079960  0.030383        0.037969  0.072598
+6                     0.078504  0.034437        0.000000  0.067721
+
+======================================================================
+INSIGHTS
+======================================================================
+  user_msg              dist0=0.0541  dist2=0.0332 (drop ratio=1.6x)  dist4=0.0366 (drop ratio=1.5x)
+  asst_gen              dist0=0.4062  dist2=0.1064 (drop ratio=3.8x)  dist4=0.0925 (drop ratio=4.4x)
+  asst_tool_call        dist0=0.3168  dist2=0.0585 (drop ratio=5.4x)  dist4=0.0296 (drop ratio=10.7x)
+
+[plots] generating...
+[plot] saved → outputs/attention_analysis/attn_decay_by_role.png
+[plot] saved → outputs/attention_analysis/attn_heatmap.png
+[plot] saved → outputs/attention_analysis/role_share_per_turn.png
+[plot] saved → outputs/attention_analysis/token_count_vs_attn.png
+
+[done] all outputs in outputs/attention_analysis/
