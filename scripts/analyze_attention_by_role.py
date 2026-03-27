@@ -11,13 +11,28 @@ For each simulation in tau2-bench, we:
   4. Aggregate attention by (role, turn_distance_from_current) and save
      summary CSVs + PNG plots.
 
-Usage:
+Usage (single file):
   python3 scripts/analyze_attention_by_role.py \
-      [--model-path ./local_models/Qwen3.5-0.8B] \
-      [--sim-file tau2-bench/data/simulations/stress_baseline_1x30_1st.json] \
-      [--max-sims 5] \
-      [--max-turns 8] \
-      [--output-dir outputs/attention_analysis]
+      --model-path ./local_models/Qwen3.5-9B \
+      --sim-file tau2-bench/data/simulations/stress_baseline_1x10_task10_1st.json \
+      --device cuda:2
+
+Usage (all four task10 files, GPU 2):
+  python3 scripts/analyze_attention_by_role.py \
+      --model-path ./local_models/Qwen3.5-9B \
+      --sim-file \
+          tau2-bench/data/simulations/stress_baseline_1x10_task10_1st.json \
+          tau2-bench/data/simulations/stress_baseline_1x10_task10_2nd.json \
+          tau2-bench/data/simulations/stress_baseline_1x10_task10_3rd.json \
+          tau2-bench/data/simulations/stress_baseline_1x10_task10_4th.json \
+      --device cuda:2 \
+      --output-dir outputs/attention_analysis_task10
+
+Parameters:
+  --sim-file   one or more JSON files to analyse (space-separated after the flag)
+  --max-sims   per-file limit on simulations (0 or omit = use all sims in each file)
+  --max-turns  per-sim limit on assistant turns to analyse (0 = all turns)
+  --device     cuda:N to target GPU N; "auto" picks cuda:0 if CUDA is available
 """
 from __future__ import annotations
 
@@ -47,15 +62,31 @@ ROOT = Path(__file__).parent.parent
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Analyse per-role attention in multi-turn conversations.")
-    p.add_argument("--model-path", default=str(ROOT / "local_models" / "Qwen3.5-0.8B"))
+    p.add_argument("--model-path", default=str(ROOT / "local_models" / "Qwen3.5-9B"))
     p.add_argument(
         "--sim-file",
-        default=str(ROOT / "tau2-bench" / "data" / "simulations" / "stress_baseline_1x30_1st.json"),
+        nargs="+",
+        default=[
+            str(ROOT / "tau2-bench" / "data" / "simulations" / "stress_baseline_1x10_task10_1st.json"),
+            str(ROOT / "tau2-bench" / "data" / "simulations" / "stress_baseline_1x10_task10_2nd.json"),
+            str(ROOT / "tau2-bench" / "data" / "simulations" / "stress_baseline_1x10_task10_3rd.json"),
+            str(ROOT / "tau2-bench" / "data" / "simulations" / "stress_baseline_1x10_task10_4th.json"),
+        ],
+        help="One or more simulation JSON files to analyse (space-separated).",
     )
-    p.add_argument("--max-sims", type=int, default=5, help="How many simulations to analyse")
-    p.add_argument("--max-turns", type=int, default=8, help="Max assistant turns to process per sim")
-    p.add_argument("--output-dir", default=str(ROOT / "outputs" / "attention_analysis"))
-    p.add_argument("--device", default="auto")
+    p.add_argument(
+        "--max-sims", type=int, default=0,
+        help="Per-file limit on simulations to analyse (0 = all sims in each file).",
+    )
+    p.add_argument(
+        "--max-turns", type=int, default=0,
+        help="Per-sim limit on assistant turns to analyse (0 = all turns).",
+    )
+    p.add_argument("--output-dir", default=str(ROOT / "outputs" / "attention_analysis_task10"))
+    p.add_argument(
+        "--device", default=2,
+        help="Device to run on: 'auto', 'cpu', 'cuda', 'cuda:0', 'cuda:2', etc.",
+    )
     p.add_argument("--dtype", default="auto")
     return p.parse_args()
 
@@ -229,9 +260,13 @@ def analyse_simulation(
 
     records = []
 
-    # Analyse up to max_turns assistant turns (spread evenly or take last ones
-    # since later turns have richer history)
-    turns_to_analyse = assistant_indices[-max_turns:]
+    # Analyse up to max_turns assistant turns (0 means all turns).
+    # Taking all turns provides full coverage of both early and late conversation
+    # phases; taking only the last N captures the rich-history phase only.
+    if max_turns and max_turns > 0:
+        turns_to_analyse = assistant_indices[-max_turns:]
+    else:
+        turns_to_analyse = assistant_indices
 
     for turn_idx in turns_to_analyse:
         # Context = all messages UP TO AND INCLUDING this assistant turn
@@ -512,6 +547,15 @@ def main() -> None:
     device_str = args.device
     if device_str == "auto":
         device_str = "cuda" if torch.cuda.is_available() else "cpu"
+    # Validate device string early to give a clear error message.
+    if device_str.startswith("cuda"):
+        parts = device_str.split(":")
+        gpu_idx = int(parts[1]) if len(parts) > 1 else 0
+        n_gpus = torch.cuda.device_count()
+        if gpu_idx >= n_gpus:
+            print(f"[error] Requested {device_str} but only {n_gpus} GPU(s) visible."
+                  f" Available: cuda:0 .. cuda:{n_gpus-1}", file=sys.stderr)
+            sys.exit(1)
     print(f"[info] device={device_str}  model={args.model_path}")
 
     dtype = torch.bfloat16 if (device_str == "cuda" and torch.cuda.is_bf16_supported()) else torch.float32
@@ -534,33 +578,45 @@ def main() -> None:
     model.eval().to(device_str)
     print(f"[info] model loaded: {sum(p.numel() for p in model.parameters()) / 1e6:.0f}M params")
 
-    # ── 2. Load simulations ────────────────────────────────────────────────
-    sim_path = Path(args.sim_file)
-    print(f"[info] sim_file={sim_path}")
-    with open(sim_path) as f:
-        data = json.load(f)
-    simulations = data.get("simulations", [])
-    simulations = simulations[: args.max_sims]
-    print(f"[info] analysing {len(simulations)} simulations")
+    # ── 2. Load simulations from all specified files ──────────────────────
+    sim_files = [Path(p) for p in args.sim_file]
+    print(f"[info] {len(sim_files)} sim file(s) to process:")
+    for sf in sim_files:
+        print(f"       {sf}")
 
     # ── 3. Run analysis ────────────────────────────────────────────────────
     all_records: list[dict] = []
-    for sim_i, sim in enumerate(simulations):
-        sim_id_short = sim.get("id", "?")[:8]
-        task_id = sim.get("task_id", "?")
-        msgs_total = len(sim.get("messages", []) or [])
-        print(f"\n[sim {sim_i+1}/{len(simulations)}]  id={sim_id_short}  "
-              f"task={task_id}  msgs={msgs_total}")
-        recs = analyse_simulation(
-            sim=sim,
-            model=model,
-            tokenizer=tokenizer,
-            device=device_str,
-            max_turns=args.max_turns,
-        )
-        all_records.extend(recs)
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+    for file_i, sim_path in enumerate(sim_files):
+        print(f"\n{'='*60}")
+        print(f"[file {file_i+1}/{len(sim_files)}] {sim_path.name}")
+        print(f"{'='*60}")
+        with open(sim_path) as f:
+            data = json.load(f)
+        simulations = data.get("simulations", [])
+        if args.max_sims and args.max_sims > 0:
+            simulations = simulations[: args.max_sims]
+        print(f"[info] analysing {len(simulations)} simulations")
+
+        for sim_i, sim in enumerate(simulations):
+            sim_id_short = sim.get("id", "?")[:8]
+            task_id = sim.get("task_id", "?")
+            msgs_total = len(sim.get("messages", []) or [])
+            print(f"\n[sim {sim_i+1}/{len(simulations)}]  id={sim_id_short}  "
+                  f"task={task_id}  msgs={msgs_total}")
+            recs = analyse_simulation(
+                sim=sim,
+                model=model,
+                tokenizer=tokenizer,
+                device=device_str,
+                max_turns=args.max_turns,
+            )
+            # Tag each record with the source filename for traceability
+            src_tag = sim_path.stem
+            for r in recs:
+                r["src_file"] = src_tag
+            all_records.extend(recs)
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
     if not all_records:
         print("[error] No records collected. Check model/data paths.")
