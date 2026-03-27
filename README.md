@@ -275,21 +275,21 @@ python offline_infer.py \
 
 | 脚本 | 用途 |
 |------|------|
-| `scripts/run_tau2_offline_sequential.sh` | 单 GPU 顺序评测 baseline → streamingllm → h2o |
-| `scripts/run_tau2_offline_parallel_multi_gpu.sh` | 多 GPU 并行评测 |
-| `scripts/run_tau2_stress_test.sh` | H2O heavy-hitter 压力测试（推荐） |
+| `scripts/run/run_tau2_offline_sequential.sh` | 单 GPU 顺序评测 baseline → streamingllm → h2o |
+| `scripts/run/run_tau2_offline_parallel_multi_gpu.sh` | 多 GPU 并行评测 |
+| `scripts/run/run_tau2_stress_test.sh` | H2O heavy-hitter 压力测试（推荐） |
 
 ### 压力测试
 
 ```bash
 # 全部 6 组配置（baseline + streamingllm + h2o×4）
-bash scripts/run_tau2_stress_test.sh
+bash scripts/run/run_tau2_stress_test.sh
 
 # Phase 1：baseline + streamingllm(heavy=0) + h2o(heavy=64) 三方核心对比
-PHASE=1 bash scripts/run_tau2_stress_test.sh
+PHASE=1 bash scripts/run/run_tau2_stress_test.sh
 
 # Phase 2：h2o heavy sweep（heavy=32, 128, 256）
-PHASE=2 bash scripts/run_tau2_stress_test.sh
+PHASE=2 bash scripts/run/run_tau2_stress_test.sh
 ```
 
 当前脚本默认参数：
@@ -349,7 +349,7 @@ Phase 组织方式：
 
 ```bash
 # 更换 window 大小（所有配置统一更换）
-WINDOW_SIZE=256 bash scripts/run_tau2_stress_test.sh
+WINDOW_SIZE=256 bash scripts/run/run_tau2_stress_test.sh
 
 # 完整覆盖示例
 GPU_A=0 GPU_B=1 GPU_C=2 \
@@ -357,10 +357,7 @@ NUM_TASKS=30 \
 WINDOW_SIZE=128 \
 AGENT_MAX_TOKENS=1024 \
 SINK_SIZE=4 \
-bash scripts/run_tau2_stress_test.sh
-```
-
-### max_tokens 建议
+bash scripts/run/run_tau2_stress_test.sh
 
 tau2-bench 中 agent 需要生成：
 - 工具调用 JSON（30-100 tokens）

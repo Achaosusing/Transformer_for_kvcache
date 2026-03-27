@@ -1,0 +1,592 @@
+nohup: ignoring input
+[info] device=cuda:2  model=/mnt/task_runtime/shiyl_workspace/workspace/haohong/Transformer_for_kvcache/local_models/Qwen3.5-9B
+`torch_dtype` is deprecated! Use `dtype` instead!
+The fast path is not available because one of the required library is not installed. Falling back to torch implementation. To install follow https://github.com/fla-org/flash-linear-attention#installation and https://github.com/Dao-AILab/causal-conv1d
+Loading weights:   0%|          | 0/427 [00:00<?, ?it/s]Loading weights: 100%|██████████| 427/427 [00:00<00:00, 4521.79it/s]
+[info] model loaded: 8954M params
+[info] 4 sim file(s) to process:
+       /mnt/task_runtime/shiyl_workspace/workspace/haohong/Transformer_for_kvcache/tau2-bench/data/simulations/stress_baseline_1x10_task10_1st.json
+       /mnt/task_runtime/shiyl_workspace/workspace/haohong/Transformer_for_kvcache/tau2-bench/data/simulations/stress_baseline_1x10_task10_2nd.json
+       /mnt/task_runtime/shiyl_workspace/workspace/haohong/Transformer_for_kvcache/tau2-bench/data/simulations/stress_baseline_1x10_task10_3rd.json
+       /mnt/task_runtime/shiyl_workspace/workspace/haohong/Transformer_for_kvcache/tau2-bench/data/simulations/stress_baseline_1x10_task10_4th.json
+
+============================================================
+[file 1/4] stress_baseline_1x10_task10_1st.json
+============================================================
+[info] analysing 10 simulations
+
+[sim 1/10]  id=308782ac  task=3  msgs=12
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=   98  spans= 3  attn_sum=1.0001
+  turn= 4  seq_len=  150  spans= 5  attn_sum=1.0000
+  turn= 6  seq_len=  212  spans= 7  attn_sum=1.0001
+  turn= 8  seq_len=  382  spans= 9  attn_sum=1.0000
+  turn=10  seq_len=  487  spans=11  attn_sum=1.0000
+
+[sim 2/10]  id=8bdffbc4  task=0  msgs=12
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=   71  spans= 3  attn_sum=0.9999
+  turn= 4  seq_len=  166  spans= 5  attn_sum=1.0000
+  turn= 6  seq_len=  253  spans= 7  attn_sum=1.0000
+  turn= 8  seq_len=  529  spans= 9  attn_sum=1.0000
+  turn=10  seq_len=  883  spans=11  attn_sum=1.0000
+
+[sim 3/10]  id=2b4996df  task=1  msgs=16
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=   95  spans= 3  attn_sum=1.0000
+  turn= 4  seq_len=  146  spans= 5  attn_sum=1.0000
+  turn= 6  seq_len=  234  spans= 7  attn_sum=1.0000
+  turn= 8  seq_len=  281  spans= 9  attn_sum=1.0001
+  turn=10  seq_len=  527  spans=11  attn_sum=1.0001
+  turn=12  seq_len=  834  spans=13  attn_sum=1.0000
+  turn=14  seq_len= 1108  spans=15  attn_sum=1.0000
+
+[sim 4/10]  id=d0706450  task=4  msgs=14
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=  136  spans= 3  attn_sum=1.0000
+  turn= 4  seq_len=  228  spans= 5  attn_sum=1.0001
+  turn= 6  seq_len=  330  spans= 7  attn_sum=0.9999
+  turn= 8  seq_len=  384  spans= 9  attn_sum=1.0000
+  turn=10  seq_len=  696  spans=11  attn_sum=1.0000
+  turn=12  seq_len= 1022  spans=13  attn_sum=1.0000
+
+[sim 5/10]  id=15109926  task=6  msgs=16
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=  120  spans= 3  attn_sum=1.0001
+  turn= 4  seq_len=  186  spans= 5  attn_sum=0.9999
+  turn= 6  seq_len=  245  spans= 7  attn_sum=0.9999
+  turn= 8  seq_len=  376  spans= 9  attn_sum=0.9999
+  turn=10  seq_len=  584  spans=11  attn_sum=1.0000
+  turn=12  seq_len=  783  spans=13  attn_sum=1.0000
+  turn=14  seq_len=  956  spans=15  attn_sum=1.0000
+
+[sim 6/10]  id=ac0f3fbe  task=13  msgs=12
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=   92  spans= 3  attn_sum=1.0001
+  turn= 4  seq_len=  141  spans= 5  attn_sum=0.9998
+  turn= 6  seq_len=  205  spans= 7  attn_sum=0.9999
+  turn= 8  seq_len=  502  spans= 9  attn_sum=1.0001
+  turn=10  seq_len=  746  spans=11  attn_sum=1.0000
+
+[sim 7/10]  id=a28f80f7  task=26  msgs=14
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=   75  spans= 3  attn_sum=1.0000
+  turn= 4  seq_len=  134  spans= 5  attn_sum=1.0001
+  turn= 6  seq_len=  421  spans= 7  attn_sum=1.0000
+  turn= 8  seq_len=  530  spans= 9  attn_sum=1.0000
+  turn=10  seq_len=  682  spans=11  attn_sum=1.0000
+  turn=12  seq_len=  755  spans=13  attn_sum=1.0000
+
+[sim 8/10]  id=f85b9bed  task=28  msgs=16
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=   78  spans= 3  attn_sum=1.0000
+  turn= 4  seq_len=  150  spans= 5  attn_sum=1.0001
+  turn= 6  seq_len=  201  spans= 7  attn_sum=1.0000
+  turn= 8  seq_len=  490  spans= 9  attn_sum=1.0000
+  turn=10  seq_len=  694  spans=11  attn_sum=1.0000
+  turn=12  seq_len=  760  spans=13  attn_sum=1.0000
+  turn=14  seq_len=  855  spans=15  attn_sum=1.0000
+
+[sim 9/10]  id=6db079ee  task=10  msgs=32
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=  122  spans= 3  attn_sum=1.0000
+  turn= 4  seq_len=  177  spans= 5  attn_sum=1.0000
+  turn= 6  seq_len=  262  spans= 7  attn_sum=1.0000
+  turn= 8  seq_len=  317  spans= 9  attn_sum=1.0000
+  turn=10  seq_len=  603  spans=11  attn_sum=1.0000
+  turn=12  seq_len=  930  spans=13  attn_sum=1.0000
+  turn=14  seq_len= 1092  spans=15  attn_sum=1.0000
+  turn=16  seq_len= 1185  spans=17  attn_sum=1.0000
+  turn=18  seq_len= 1474  spans=19  attn_sum=1.0000
+  turn=20  seq_len= 1798  spans=21  attn_sum=1.0000
+  turn=22  seq_len= 2149  spans=23  attn_sum=1.0000
+  turn=24  seq_len= 2392  spans=25  attn_sum=1.0000
+  turn=26  seq_len= 2581  spans=27  attn_sum=1.0000
+  turn=28  seq_len= 2828  spans=29  attn_sum=1.0000
+  turn=30  seq_len= 3180  spans=31  attn_sum=1.0000
+
+[sim 10/10]  id=b3f73cd0  task=5  msgs=129
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=  150  spans= 3  attn_sum=1.0000
+  turn= 4  seq_len=  248  spans= 5  attn_sum=1.0000
+  turn= 6  seq_len=  312  spans= 7  attn_sum=0.9999
+  turn= 8  seq_len=  411  spans= 9  attn_sum=1.0000
+  turn=10  seq_len=  476  spans=11  attn_sum=1.0000
+  turn=12  seq_len=  572  spans=13  attn_sum=1.0000
+  turn=14  seq_len=  668  spans=15  attn_sum=1.0000
+  turn=16  seq_len=  764  spans=17  attn_sum=1.0000
+  turn=18  seq_len=  860  spans=19  attn_sum=0.9999
+  turn=20  seq_len=  956  spans=21  attn_sum=1.0000
+  turn=22  seq_len= 1052  spans=23  attn_sum=1.0000
+  turn=24  seq_len= 1148  spans=25  attn_sum=1.0000
+  turn=26  seq_len= 1244  spans=27  attn_sum=1.0000
+  turn=28  seq_len= 1340  spans=29  attn_sum=0.9999
+  turn=30  seq_len= 1436  spans=31  attn_sum=1.0000
+  turn=32  seq_len= 1532  spans=33  attn_sum=1.0000
+  turn=34  seq_len= 1628  spans=35  attn_sum=1.0000
+  turn=36  seq_len= 1724  spans=37  attn_sum=1.0000
+  turn=38  seq_len= 1820  spans=39  attn_sum=1.0000
+  turn=40  seq_len= 1916  spans=41  attn_sum=0.9999
+  turn=42  seq_len= 2012  spans=43  attn_sum=1.0000
+  turn=44  seq_len= 2108  spans=45  attn_sum=1.0000
+  turn=46  seq_len= 2204  spans=47  attn_sum=1.0000
+  turn=48  seq_len= 2300  spans=49  attn_sum=1.0000
+  turn=50  seq_len= 2396  spans=51  attn_sum=1.0001
+  turn=52  seq_len= 2492  spans=53  attn_sum=1.0000
+  turn=54  seq_len= 2588  spans=55  attn_sum=1.0000
+  turn=56  seq_len= 2684  spans=57  attn_sum=1.0000
+  turn=58  seq_len= 2780  spans=59  attn_sum=1.0001
+  turn=60  seq_len= 2876  spans=61  attn_sum=1.0000
+  turn=62  seq_len= 2972  spans=63  attn_sum=1.0000
+  turn=64  seq_len= 3068  spans=65  attn_sum=0.9999
+  turn=66  seq_len= 3164  spans=67  attn_sum=1.0000
+  turn=68  seq_len= 3260  spans=69  attn_sum=1.0000
+  turn=70  seq_len= 3356  spans=71  attn_sum=1.0000
+  turn=72  seq_len= 3452  spans=73  attn_sum=1.0000
+  turn=74  seq_len= 3548  spans=75  attn_sum=1.0000
+  turn=76  seq_len= 3644  spans=77  attn_sum=1.0000
+  turn=78  seq_len= 3740  spans=79  attn_sum=1.0000
+  turn=80  seq_len= 3836  spans=81  attn_sum=1.0000
+  turn=82  seq_len= 3932  spans=83  attn_sum=1.0000
+  turn=84  seq_len= 4028  spans=85  attn_sum=1.0000
+  turn=86  seq_len= 4124  spans=87  attn_sum=1.0000
+  turn=88  seq_len= 4220  spans=89  attn_sum=1.0000
+  turn=90  seq_len= 4316  spans=91  attn_sum=1.0000
+  turn=92  seq_len= 4412  spans=93  attn_sum=0.9999
+  turn=94  seq_len= 4508  spans=95  attn_sum=1.0000
+  turn=96  seq_len= 4604  spans=97  attn_sum=1.0000
+  turn=98  seq_len= 4700  spans=99  attn_sum=1.0000
+  turn=100  seq_len= 4796  spans=101  attn_sum=1.0000
+  turn=102  seq_len= 4892  spans=103  attn_sum=1.0000
+  turn=104  seq_len= 4988  spans=105  attn_sum=1.0000
+  turn=106  seq_len= 5084  spans=107  attn_sum=1.0000
+  turn=108  seq_len= 5180  spans=109  attn_sum=1.0000
+  turn=110  seq_len= 5276  spans=111  attn_sum=1.0000
+  turn=112  seq_len= 5372  spans=113  attn_sum=1.0000
+  turn=114  seq_len= 5468  spans=115  attn_sum=1.0000
+  turn=116  seq_len= 5564  spans=117  attn_sum=1.0000
+  turn=118  seq_len= 5660  spans=119  attn_sum=0.9999
+  turn=120  seq_len= 5756  spans=121  attn_sum=0.9999
+  turn=122  seq_len= 5852  spans=123  attn_sum=1.0000
+  turn=124  seq_len= 5948  spans=125  attn_sum=1.0000
+  turn=126  seq_len= 6044  spans=127  attn_sum=1.0000
+  turn=128  seq_len= 6140  spans=129  attn_sum=1.0000
+
+============================================================
+[file 2/4] stress_baseline_1x10_task10_2nd.json
+============================================================
+[info] analysing 10 simulations
+
+[sim 1/10]  id=5dcce042  task=3  msgs=14
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=  112  spans= 3  attn_sum=1.0000
+  turn= 4  seq_len=  158  spans= 5  attn_sum=1.0000
+  turn= 6  seq_len=  212  spans= 7  attn_sum=1.0000
+  turn= 8  seq_len=  508  spans= 9  attn_sum=1.0000
+  turn=10  seq_len=  682  spans=11  attn_sum=1.0000
+  turn=12  seq_len=  826  spans=13  attn_sum=1.0000
+
+[sim 2/10]  id=a5ab953a  task=1  msgs=16
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=   95  spans= 3  attn_sum=1.0000
+  turn= 4  seq_len=  146  spans= 5  attn_sum=1.0000
+  turn= 6  seq_len=  234  spans= 7  attn_sum=1.0000
+  turn= 8  seq_len=  281  spans= 9  attn_sum=1.0001
+  turn=10  seq_len=  445  spans=11  attn_sum=1.0000
+  turn=12  seq_len=  752  spans=13  attn_sum=1.0000
+  turn=14  seq_len= 1004  spans=15  attn_sum=1.0000
+
+[sim 3/10]  id=191222ad  task=4  msgs=8
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=  121  spans= 3  attn_sum=1.0000
+  turn= 4  seq_len=  199  spans= 5  attn_sum=1.0001
+  turn= 6  seq_len=  281  spans= 7  attn_sum=1.0001
+
+[sim 4/10]  id=d6860f22  task=0  msgs=14
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=   71  spans= 3  attn_sum=0.9999
+  turn= 4  seq_len=  166  spans= 5  attn_sum=1.0000
+  turn= 6  seq_len=  253  spans= 7  attn_sum=1.0001
+  turn= 8  seq_len=  529  spans= 9  attn_sum=1.0000
+  turn=10  seq_len=  886  spans=11  attn_sum=0.9999
+  turn=12  seq_len= 1154  spans=13  attn_sum=0.9999
+
+[sim 5/10]  id=6b0f544b  task=6  msgs=14
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=  116  spans= 3  attn_sum=1.0000
+  turn= 4  seq_len=  192  spans= 5  attn_sum=1.0000
+  turn= 6  seq_len=  241  spans= 7  attn_sum=1.0000
+  turn= 8  seq_len=  353  spans= 9  attn_sum=1.0000
+  turn=10  seq_len=  544  spans=11  attn_sum=1.0000
+  turn=12  seq_len=  740  spans=13  attn_sum=1.0000
+
+[sim 6/10]  id=76299d87  task=10  msgs=24
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=  122  spans= 3  attn_sum=1.0000
+  turn= 4  seq_len=  177  spans= 5  attn_sum=1.0000
+  turn= 6  seq_len=  259  spans= 7  attn_sum=1.0000
+  turn= 8  seq_len=  303  spans= 9  attn_sum=0.9999
+  turn=10  seq_len=  497  spans=11  attn_sum=1.0000
+  turn=12  seq_len=  572  spans=13  attn_sum=1.0000
+  turn=14  seq_len=  720  spans=15  attn_sum=1.0000
+  turn=16  seq_len=  786  spans=17  attn_sum=0.9999
+  turn=18  seq_len= 1062  spans=19  attn_sum=1.0000
+  turn=20  seq_len= 1150  spans=21  attn_sum=1.0000
+  turn=22  seq_len= 1263  spans=23  attn_sum=0.9999
+
+[sim 7/10]  id=beb53fc4  task=13  msgs=12
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=   92  spans= 3  attn_sum=1.0001
+  turn= 4  seq_len=  141  spans= 5  attn_sum=0.9998
+  turn= 6  seq_len=  205  spans= 7  attn_sum=0.9999
+  turn= 8  seq_len=  479  spans= 9  attn_sum=1.0000
+  turn=10  seq_len=  672  spans=11  attn_sum=1.0000
+
+[sim 8/10]  id=ce908800  task=26  msgs=14
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=   75  spans= 3  attn_sum=1.0000
+  turn= 4  seq_len=  134  spans= 5  attn_sum=1.0001
+  turn= 6  seq_len=  421  spans= 7  attn_sum=1.0000
+  turn= 8  seq_len=  559  spans= 9  attn_sum=1.0000
+  turn=10  seq_len=  777  spans=11  attn_sum=1.0000
+  turn=12  seq_len=  851  spans=13  attn_sum=1.0001
+
+[sim 9/10]  id=266e6e98  task=28  msgs=14
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=   78  spans= 3  attn_sum=1.0000
+  turn= 4  seq_len=  150  spans= 5  attn_sum=1.0001
+  turn= 6  seq_len=  203  spans= 7  attn_sum=0.9999
+  turn= 8  seq_len=  492  spans= 9  attn_sum=1.0000
+  turn=10  seq_len=  804  spans=11  attn_sum=1.0000
+  turn=12  seq_len= 1083  spans=13  attn_sum=1.0000
+
+[sim 10/10]  id=4560b0ff  task=5  msgs=131
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=  150  spans= 3  attn_sum=1.0000
+  turn= 4  seq_len=  248  spans= 5  attn_sum=1.0000
+  turn= 6  seq_len=  525  spans= 7  attn_sum=1.0000
+  turn= 8  seq_len=  776  spans= 9  attn_sum=0.9999
+  turn=10  seq_len=  841  spans=11  attn_sum=1.0000
+  turn=12  seq_len=  943  spans=13  attn_sum=1.0000
+  turn=14  seq_len= 1030  spans=15  attn_sum=1.0000
+  turn=16  seq_len= 1125  spans=17  attn_sum=0.9999
+  turn=18  seq_len= 1254  spans=19  attn_sum=1.0000
+  turn=20  seq_len= 1338  spans=21  attn_sum=1.0000
+  turn=22  seq_len= 1437  spans=23  attn_sum=1.0000
+  turn=24  seq_len= 1557  spans=25  attn_sum=0.9999
+  turn=26  seq_len= 1655  spans=27  attn_sum=1.0000
+  turn=28  seq_len= 1775  spans=29  attn_sum=1.0000
+  turn=30  seq_len= 1874  spans=31  attn_sum=1.0000
+  turn=32  seq_len= 1994  spans=33  attn_sum=1.0000
+  turn=34  seq_len= 2092  spans=35  attn_sum=1.0000
+  turn=36  seq_len= 2212  spans=37  attn_sum=1.0000
+  turn=38  seq_len= 2311  spans=39  attn_sum=0.9999
+  turn=40  seq_len= 2431  spans=41  attn_sum=1.0000
+  turn=42  seq_len= 2529  spans=43  attn_sum=1.0000
+  turn=44  seq_len= 2649  spans=45  attn_sum=1.0000
+  turn=46  seq_len= 2748  spans=47  attn_sum=1.0000
+  turn=48  seq_len= 2868  spans=49  attn_sum=1.0000
+  turn=50  seq_len= 2966  spans=51  attn_sum=1.0000
+  turn=52  seq_len= 3086  spans=53  attn_sum=1.0000
+  turn=54  seq_len= 3185  spans=55  attn_sum=1.0001
+  turn=56  seq_len= 3305  spans=57  attn_sum=1.0000
+  turn=58  seq_len= 3403  spans=59  attn_sum=1.0000
+  turn=60  seq_len= 3523  spans=61  attn_sum=1.0000
+  turn=62  seq_len= 3622  spans=63  attn_sum=1.0000
+  turn=64  seq_len= 3742  spans=65  attn_sum=1.0001
+  turn=66  seq_len= 3840  spans=67  attn_sum=1.0000
+  turn=68  seq_len= 3960  spans=69  attn_sum=1.0000
+  turn=70  seq_len= 4059  spans=71  attn_sum=1.0000
+  turn=72  seq_len= 4179  spans=73  attn_sum=1.0000
+  turn=74  seq_len= 4277  spans=75  attn_sum=1.0001
+  turn=76  seq_len= 4397  spans=77  attn_sum=1.0000
+  turn=78  seq_len= 4496  spans=79  attn_sum=1.0000
+  turn=80  seq_len= 4616  spans=81  attn_sum=1.0000
+  turn=82  seq_len= 4714  spans=83  attn_sum=1.0000
+  turn=84  seq_len= 4834  spans=85  attn_sum=1.0000
+  turn=86  seq_len= 4933  spans=87  attn_sum=1.0000
+  turn=88  seq_len= 5053  spans=89  attn_sum=1.0000
+  turn=90  seq_len= 5151  spans=91  attn_sum=1.0000
+  turn=92  seq_len= 5271  spans=93  attn_sum=1.0000
+  turn=94  seq_len= 5370  spans=95  attn_sum=1.0000
+  turn=96  seq_len= 5490  spans=97  attn_sum=0.9999
+  turn=98  seq_len= 5588  spans=99  attn_sum=1.0000
+  turn=100  seq_len= 5708  spans=101  attn_sum=1.0000
+  turn=102  seq_len= 5807  spans=103  attn_sum=1.0000
+  turn=104  seq_len= 5927  spans=105  attn_sum=1.0000
+  turn=106  seq_len= 6025  spans=107  attn_sum=1.0000
+  turn=108  seq_len= 6145  spans=109  attn_sum=1.0000
+  turn=110  seq_len= 6244  spans=111  attn_sum=1.0000
+  turn=112  seq_len= 6364  spans=113  attn_sum=1.0000
+  turn=114  seq_len= 6462  spans=115  attn_sum=0.9999
+  turn=116  seq_len= 6582  spans=117  attn_sum=1.0000
+  turn=118  seq_len= 6681  spans=119  attn_sum=1.0000
+  turn=120  seq_len= 6801  spans=121  attn_sum=1.0000
+  turn=122  seq_len= 6899  spans=123  attn_sum=1.0000
+  turn=124  seq_len= 7019  spans=125  attn_sum=1.0000
+  turn=126  seq_len= 7118  spans=127  attn_sum=1.0000
+  turn=128  seq_len= 7238  spans=129  attn_sum=1.0000
+  turn=130  seq_len= 7336  spans=131  attn_sum=1.0001
+
+============================================================
+[file 3/4] stress_baseline_1x10_task10_3rd.json
+============================================================
+[info] analysing 10 simulations
+
+[sim 1/10]  id=3f92cd71  task=3  msgs=24
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=  128  spans= 3  attn_sum=1.0000
+  turn= 4  seq_len=  195  spans= 5  attn_sum=1.0000
+  turn= 6  seq_len=  257  spans= 7  attn_sum=1.0000
+  turn= 8  seq_len=  356  spans= 9  attn_sum=1.0000
+  turn=10  seq_len=  450  spans=11  attn_sum=1.0000
+  turn=12  seq_len=  550  spans=13  attn_sum=1.0000
+  turn=14  seq_len=  683  spans=15  attn_sum=1.0000
+  turn=16  seq_len=  795  spans=17  attn_sum=1.0000
+  turn=18  seq_len=  945  spans=19  attn_sum=1.0000
+  turn=20  seq_len= 1124  spans=21  attn_sum=1.0000
+  turn=22  seq_len= 1193  spans=23  attn_sum=1.0000
+
+[sim 2/10]  id=d097e33c  task=0  msgs=14
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=   71  spans= 3  attn_sum=0.9999
+  turn= 4  seq_len=  166  spans= 5  attn_sum=1.0000
+  turn= 6  seq_len=  253  spans= 7  attn_sum=1.0000
+  turn= 8  seq_len=  529  spans= 9  attn_sum=1.0000
+  turn=10  seq_len=  885  spans=11  attn_sum=0.9999
+  turn=12  seq_len= 1186  spans=13  attn_sum=1.0001
+
+[sim 3/10]  id=31594b11  task=1  msgs=20
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=   96  spans= 3  attn_sum=1.0000
+  turn= 4  seq_len=  147  spans= 5  attn_sum=1.0000
+  turn= 6  seq_len=  235  spans= 7  attn_sum=1.0000
+  turn= 8  seq_len=  282  spans= 9  attn_sum=1.0000
+  turn=10  seq_len=  446  spans=11  attn_sum=1.0000
+  turn=12  seq_len=  726  spans=13  attn_sum=1.0000
+  turn=14  seq_len=  805  spans=15  attn_sum=1.0000
+  turn=16  seq_len= 1085  spans=17  attn_sum=1.0000
+  turn=18  seq_len= 1370  spans=19  attn_sum=1.0001
+
+[sim 4/10]  id=944d8acf  task=4  msgs=16
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=  127  spans= 3  attn_sum=0.9999
+  turn= 4  seq_len=  217  spans= 5  attn_sum=0.9999
+  turn= 6  seq_len=  295  spans= 7  attn_sum=0.9999
+  turn= 8  seq_len=  817  spans= 9  attn_sum=1.0000
+  turn=10  seq_len= 1008  spans=11  attn_sum=1.0000
+  turn=12  seq_len= 1267  spans=13  attn_sum=1.0000
+  turn=14  seq_len= 1481  spans=15  attn_sum=1.0000
+
+[sim 5/10]  id=520d1c5a  task=6  msgs=20
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=  116  spans= 3  attn_sum=1.0000
+  turn= 4  seq_len=  192  spans= 5  attn_sum=1.0000
+  turn= 6  seq_len=  241  spans= 7  attn_sum=1.0000
+  turn= 8  seq_len=  385  spans= 9  attn_sum=1.0000
+  turn=10  seq_len=  574  spans=11  attn_sum=1.0001
+  turn=12  seq_len=  915  spans=13  attn_sum=1.0000
+  turn=14  seq_len= 1206  spans=15  attn_sum=1.0000
+  turn=16  seq_len= 1408  spans=17  attn_sum=1.0000
+  turn=18  seq_len= 1729  spans=19  attn_sum=1.0001
+
+[sim 6/10]  id=c967a5fc  task=5  msgs=30
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=  150  spans= 3  attn_sum=1.0000
+  turn= 4  seq_len=  248  spans= 5  attn_sum=1.0000
+  turn= 6  seq_len=  525  spans= 7  attn_sum=1.0000
+  turn= 8  seq_len=  734  spans= 9  attn_sum=1.0000
+  turn=10  seq_len=  881  spans=11  attn_sum=1.0000
+  turn=12  seq_len=  938  spans=13  attn_sum=1.0000
+  turn=14  seq_len= 1014  spans=15  attn_sum=1.0000
+  turn=16  seq_len= 1126  spans=17  attn_sum=0.9999
+  turn=18  seq_len= 1177  spans=19  attn_sum=1.0001
+  turn=20  seq_len= 1497  spans=21  attn_sum=1.0000
+  turn=22  seq_len= 1737  spans=23  attn_sum=1.0000
+  turn=24  seq_len= 2045  spans=25  attn_sum=1.0000
+  turn=26  seq_len= 2346  spans=27  attn_sum=0.9999
+  turn=28  seq_len= 2572  spans=29  attn_sum=1.0000
+
+[sim 7/10]  id=0d96ef7d  task=13  msgs=14
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=   92  spans= 3  attn_sum=1.0001
+  turn= 4  seq_len=  141  spans= 5  attn_sum=0.9998
+  turn= 6  seq_len=  205  spans= 7  attn_sum=0.9999
+  turn= 8  seq_len=  479  spans= 9  attn_sum=1.0000
+  turn=10  seq_len=  672  spans=11  attn_sum=1.0000
+  turn=12  seq_len=  945  spans=13  attn_sum=1.0000
+
+[sim 8/10]  id=a79d4410  task=26  msgs=14
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=   75  spans= 3  attn_sum=1.0000
+  turn= 4  seq_len=  134  spans= 5  attn_sum=1.0001
+  turn= 6  seq_len=  421  spans= 7  attn_sum=1.0000
+  turn= 8  seq_len=  562  spans= 9  attn_sum=1.0000
+  turn=10  seq_len=  673  spans=11  attn_sum=1.0001
+  turn=12  seq_len=  746  spans=13  attn_sum=1.0000
+
+[sim 9/10]  id=836f5a12  task=28  msgs=14
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=   78  spans= 3  attn_sum=1.0000
+  turn= 4  seq_len=  150  spans= 5  attn_sum=1.0001
+  turn= 6  seq_len=  201  spans= 7  attn_sum=1.0000
+  turn= 8  seq_len=  491  spans= 9  attn_sum=1.0000
+  turn=10  seq_len=  794  spans=11  attn_sum=1.0000
+  turn=12  seq_len= 1008  spans=13  attn_sum=0.9999
+
+[sim 10/10]  id=abd69747  task=10  msgs=32
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=  123  spans= 3  attn_sum=1.0000
+  turn= 4  seq_len=  179  spans= 5  attn_sum=1.0000
+  turn= 6  seq_len=  279  spans= 7  attn_sum=1.0000
+  turn= 8  seq_len=  373  spans= 9  attn_sum=1.0000
+  turn=10  seq_len=  425  spans=11  attn_sum=1.0000
+  turn=12  seq_len=  724  spans=13  attn_sum=1.0000
+  turn=14  seq_len= 1066  spans=15  attn_sum=1.0000
+  turn=16  seq_len= 1219  spans=17  attn_sum=1.0000
+  turn=18  seq_len= 1293  spans=19  attn_sum=1.0000
+  turn=20  seq_len= 1600  spans=21  attn_sum=1.0000
+  turn=22  seq_len= 1744  spans=23  attn_sum=1.0001
+  turn=24  seq_len= 1795  spans=25  attn_sum=1.0000
+  turn=26  seq_len= 2097  spans=27  attn_sum=1.0000
+  turn=28  seq_len= 2398  spans=29  attn_sum=1.0000
+  turn=30  seq_len= 2558  spans=31  attn_sum=1.0000
+
+============================================================
+[file 4/4] stress_baseline_1x10_task10_4th.json
+============================================================
+[info] analysing 10 simulations
+
+[sim 1/10]  id=7f52b7ae  task=3  msgs=12
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=   98  spans= 3  attn_sum=1.0001
+  turn= 4  seq_len=  150  spans= 5  attn_sum=1.0000
+  turn= 6  seq_len=  212  spans= 7  attn_sum=1.0001
+  turn= 8  seq_len=  382  spans= 9  attn_sum=1.0000
+  turn=10  seq_len=  486  spans=11  attn_sum=1.0001
+
+[sim 2/10]  id=4ebfc9cf  task=4  msgs=8
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=  121  spans= 3  attn_sum=1.0000
+  turn= 4  seq_len=  199  spans= 5  attn_sum=1.0001
+  turn= 6  seq_len=  281  spans= 7  attn_sum=1.0001
+
+[sim 3/10]  id=398e0786  task=0  msgs=12
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=   71  spans= 3  attn_sum=0.9999
+  turn= 4  seq_len=  166  spans= 5  attn_sum=1.0000
+  turn= 6  seq_len=  253  spans= 7  attn_sum=1.0000
+  turn= 8  seq_len=  529  spans= 9  attn_sum=1.0000
+  turn=10  seq_len=  889  spans=11  attn_sum=1.0000
+
+[sim 4/10]  id=5a750e69  task=1  msgs=16
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=   95  spans= 3  attn_sum=1.0000
+  turn= 4  seq_len=  146  spans= 5  attn_sum=1.0000
+  turn= 6  seq_len=  234  spans= 7  attn_sum=1.0000
+  turn= 8  seq_len=  281  spans= 9  attn_sum=1.0001
+  turn=10  seq_len=  445  spans=11  attn_sum=1.0000
+  turn=12  seq_len=  750  spans=13  attn_sum=1.0000
+  turn=14  seq_len= 1011  spans=15  attn_sum=1.0001
+
+[sim 5/10]  id=112d7940  task=6  msgs=14
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=  110  spans= 3  attn_sum=0.9999
+  turn= 4  seq_len=  160  spans= 5  attn_sum=0.9999
+  turn= 6  seq_len=  208  spans= 7  attn_sum=1.0001
+  turn= 8  seq_len=  308  spans= 9  attn_sum=1.0001
+  turn=10  seq_len=  491  spans=11  attn_sum=1.0000
+  turn=12  seq_len=  669  spans=13  attn_sum=1.0000
+
+[sim 6/10]  id=e40f954f  task=5  msgs=14
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=  151  spans= 3  attn_sum=0.9999
+  turn= 4  seq_len=  249  spans= 5  attn_sum=1.0000
+  turn= 6  seq_len=  303  spans= 7  attn_sum=0.9999
+  turn= 8  seq_len=  454  spans= 9  attn_sum=1.0000
+  turn=10  seq_len=  589  spans=11  attn_sum=1.0000
+  turn=12  seq_len=  805  spans=13  attn_sum=1.0000
+
+[sim 7/10]  id=a6a13e18  task=13  msgs=12
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=   92  spans= 3  attn_sum=1.0001
+  turn= 4  seq_len=  141  spans= 5  attn_sum=0.9998
+  turn= 6  seq_len=  205  spans= 7  attn_sum=0.9999
+  turn= 8  seq_len=  479  spans= 9  attn_sum=1.0000
+  turn=10  seq_len=  672  spans=11  attn_sum=1.0000
+
+[sim 8/10]  id=d871cc09  task=26  msgs=14
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=   75  spans= 3  attn_sum=1.0000
+  turn= 4  seq_len=  134  spans= 5  attn_sum=1.0001
+  turn= 6  seq_len=  421  spans= 7  attn_sum=1.0000
+  turn= 8  seq_len=  673  spans= 9  attn_sum=1.0000
+  turn=10  seq_len=  785  spans=11  attn_sum=1.0000
+  turn=12  seq_len=  869  spans=13  attn_sum=1.0000
+
+[sim 9/10]  id=b06e9470  task=28  msgs=16
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=   78  spans= 3  attn_sum=1.0000
+  turn= 4  seq_len=  150  spans= 5  attn_sum=1.0001
+  turn= 6  seq_len=  201  spans= 7  attn_sum=1.0000
+  turn= 8  seq_len=  481  spans= 9  attn_sum=1.0000
+  turn=10  seq_len=  774  spans=11  attn_sum=1.0000
+  turn=12  seq_len= 1117  spans=13  attn_sum=1.0000
+  turn=14  seq_len= 1338  spans=15  attn_sum=1.0000
+
+[sim 10/10]  id=bc826632  task=10  msgs=28
+  [warn] tokenize failed at turn 0
+  turn= 2  seq_len=  122  spans= 3  attn_sum=1.0000
+  turn= 4  seq_len=  177  spans= 5  attn_sum=1.0000
+  turn= 6  seq_len=  259  spans= 7  attn_sum=1.0000
+  turn= 8  seq_len=  303  spans= 9  attn_sum=0.9999
+  turn=10  seq_len=  618  spans=11  attn_sum=1.0000
+  turn=12  seq_len=  789  spans=13  attn_sum=0.9999
+  turn=14  seq_len=  864  spans=15  attn_sum=1.0000
+  turn=16  seq_len= 1165  spans=17  attn_sum=1.0000
+  turn=18  seq_len= 1476  spans=19  attn_sum=1.0000
+  turn=20  seq_len= 1805  spans=21  attn_sum=1.0000
+  turn=22  seq_len= 2129  spans=23  attn_sum=0.9999
+  turn=24  seq_len= 2474  spans=25  attn_sum=1.0000
+  turn=26  seq_len= 2736  spans=27  attn_sum=1.0000
+
+[data] 11380 records saved → outputs/attention_analysis_task10_v2/attention_by_role.csv
+
+======================================================================
+SUMMARY: average attention fraction by fine_role
+======================================================================
+                attn_frac_mean  attn_frac_std  attn_mean_mean  token_count_mean  n_spans
+fine_role                                                                               
+asst_tool_call        0.147963       0.166323        0.002545         64.349558      226
+asst_greeting         0.079207       0.036913        0.008801          9.000000      400
+asst_gen              0.049440       0.101414        0.000750         79.660904     5264
+user_msg              0.013593       0.035932        0.000370         33.332605     5490
+
+======================================================================
+SUMMARY: attention fraction decay by (fine_role, asst_turns_dist)
+(turn_dist=0 is current assistant turn, higher = older)
+======================================================================
+fine_role        asst_greeting  user_msg  asst_tool_call  asst_gen
+asst_turns_dist                                                   
+0                     0.000000  0.056072        0.425163  0.395835
+1                     0.165686  0.038370        0.137213  0.094421
+2                     0.104415  0.023527        0.066264  0.058468
+3                     0.086513  0.019200        0.050712  0.045853
+4                     0.084843  0.017535        0.045406  0.033169
+5                     0.079238  0.014361        0.034066  0.025804
+6                     0.074782  0.009415        0.025158  0.020442
+
+======================================================================
+INSIGHTS
+======================================================================
+  user_msg              dist0=0.0561  dist2=0.0235 (drop ratio=2.4x)  dist4=0.0175 (drop ratio=3.2x)
+  asst_gen              dist0=0.3958  dist2=0.0585 (drop ratio=6.8x)  dist4=0.0332 (drop ratio=11.9x)
+  asst_tool_call        dist0=0.4252  dist2=0.0663 (drop ratio=6.4x)  dist4=0.0454 (drop ratio=9.4x)
+
+[plots] generating...
+[plot] saved → outputs/attention_analysis_task10_v2/attn_decay_by_role.png
+[plot] saved → outputs/attention_analysis_task10_v2/attn_heatmap.png
+[plot] saved → outputs/attention_analysis_task10_v2/role_share_per_turn.png
+[plot] saved → outputs/attention_analysis_task10_v2/token_count_vs_attn.png
+
+[done] all outputs in outputs/attention_analysis_task10_v2/
