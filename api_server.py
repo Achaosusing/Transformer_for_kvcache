@@ -84,6 +84,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Batch eviction period: prune cache every N tokens instead of every token. "
              "1=exact per-token eviction (default). Higher values reduce pruning overhead.",
     )
+    parser.add_argument(
+        "--attn-implementation", type=str, default="auto",
+        choices=["auto", "eager", "sdpa", "flash_attention_2"],
+        help="Attention implementation. 'auto' uses sdpa for baseline/streamingllm "
+             "and eager for h2o (which needs output_attentions).",
+    )
+    parser.add_argument(
+        "--collect-period", type=int, default=0,
+        help="H2O attention collection period (steps between collecting attention scores). "
+             "0=same as evict_period (default). 1=every step. Higher=fewer attention calls.",
+    )
     return parser
 
 
@@ -104,6 +115,17 @@ def main() -> None:
             "heavy_hitter_size": args.h2o_heavy_hitter_size,
         }
 
+    # Resolve attention implementation
+    attn_impl = args.attn_implementation
+    if attn_impl == "auto":
+        if fixed_method == "h2o":
+            attn_impl = "eager"  # H2O needs output_attentions → must use eager
+        else:
+            attn_impl = "sdpa"  # baseline/streamingllm → use SDPA for speed
+
+    # Resolve collect_period
+    collect_period = args.collect_period if args.collect_period > 0 else args.evict_period
+
     evaluator = OracleKVProjectAPI(
         model_path=args.model_path,
         device=args.device,
@@ -111,6 +133,7 @@ def main() -> None:
         dtype=args.dtype,
         trust_remote_code=args.trust_remote_code,
         allow_remote_files=args.allow_remote_files,
+        attn_implementation=attn_impl,
     )
 
     app = FastAPI(title="Oracle KV Eval API", version="1.0.0")
@@ -132,6 +155,7 @@ def main() -> None:
             method_configs=req_method_configs,
             max_new_tokens=max_new_tokens,
             evict_period=args.evict_period,
+            collect_period=collect_period,
             temperature=req.temperature,
             top_p=req.top_p,
             stop_on_eos=req.stop_on_eos,
@@ -174,6 +198,7 @@ def main() -> None:
             method_configs=req_method_configs,
             max_new_tokens=max_new_tokens,
             evict_period=args.evict_period,
+            collect_period=collect_period,
             temperature=req.temperature,
             top_p=req.top_p,
             stop_on_eos=True,
@@ -237,6 +262,7 @@ def main() -> None:
             method_configs=req_method_configs,
             max_new_tokens=max_new_tokens,
             evict_period=args.evict_period,
+            collect_period=collect_period,
             temperature=req.temperature,
             top_p=req.top_p,
             stop_on_eos=True,

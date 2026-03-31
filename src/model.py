@@ -24,6 +24,7 @@ class LocalTransformerModel:
         dtype: str,
         trust_remote_code: bool,
         allow_remote_files: bool,
+        attn_implementation: str = "eager",
     ) -> None:
         self.device = self._resolve_device(device)
         self._configure_gpu_memory_utilization(self.device, gpu_memory_utilization)
@@ -47,11 +48,12 @@ class LocalTransformerModel:
         try:
             self.model = AutoModelForCausalLM.from_pretrained(
                 model_path,
-                attn_implementation="eager",
+                attn_implementation=attn_implementation,
                 **kwargs,
             )
         except TypeError:
             self.model = AutoModelForCausalLM.from_pretrained(model_path, **kwargs)
+        self.attn_implementation = attn_implementation
 
         self.model.eval()
         self.model.to(self.device)

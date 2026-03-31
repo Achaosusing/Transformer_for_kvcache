@@ -33,6 +33,7 @@ class OracleKVProjectAPI:
         dtype: str = "auto",
         trust_remote_code: bool = False,
         allow_remote_files: bool = False,
+        attn_implementation: str = "eager",
     ) -> None:
         self.model = LocalTransformerModel(
             model_path=model_path,
@@ -41,6 +42,7 @@ class OracleKVProjectAPI:
             dtype=dtype,
             trust_remote_code=trust_remote_code,
             allow_remote_files=allow_remote_files,
+            attn_implementation=attn_implementation,
         )
 
     def _build_policy(self, method: str, method_cfg: dict[str, Any]):
@@ -187,6 +189,7 @@ class OracleKVProjectAPI:
         save_step_trace: bool,
         prompt_len: int,
         evict_period: int = 1,
+        collect_period: int = 1,
     ) -> tuple[list[int], list[StepTrace]]:
         # H2O = StreamingLLM (sink + window) + heavy-hitter (topk from middle).
         # Prefill with ALL prompt tokens so attention scores cover the full
@@ -211,6 +214,7 @@ class OracleKVProjectAPI:
         generated_ids: list[int] = []
         traces: list[StepTrace] = []
         eos_token_id = self.model.tokenizer.eos_token_id
+        steps_since_collect = 0
 
         for step in range(max_new_tokens):
             if save_step_trace:
@@ -242,14 +246,19 @@ class OracleKVProjectAPI:
 
             score_counters = torch.cat([score_counters, _zero])
             active_token_count += 1
+            steps_since_collect += 1
 
-            if evict_period <= 1 or need_evict:
+            # Collect attention when: (a) evicting this step, or
+            # (b) collect_period steps have elapsed since last collection.
+            need_collect = need_evict or steps_since_collect >= collect_period
+            if need_collect:
                 cached_logits, past_key_values, attention_scores = self.model.next_token_logits_from_cache_with_attention(
                     next_id,
                     past_key_values,
                     expected_tokens=active_token_count,
                 )
                 self._accumulate_h2o_scores(score_counters, attention_scores)
+                steps_since_collect = 0
             else:
                 cached_logits, past_key_values = self.model.next_token_logits_from_cache(
                     next_id,
@@ -266,6 +275,7 @@ class OracleKVProjectAPI:
         *,
         max_new_tokens: int = 512,
         evict_period: int = 1,
+        collect_period: int = 1,
         temperature: float = 0.0,
         top_p: float = 1.0,
         stop_on_eos: bool = True,
@@ -335,6 +345,7 @@ class OracleKVProjectAPI:
                         save_step_trace=save_step_trace,
                         prompt_len=prompt_len,
                         evict_period=evict_period,
+                        collect_period=collect_period,
                     )
                     elapsed = time.perf_counter() - t0
                 output_text = self.model.tokenizer.decode(generated_ids, skip_special_tokens=True)

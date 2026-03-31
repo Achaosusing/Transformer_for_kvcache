@@ -1,0 +1,8 @@
+method,num_trials,num_tasks,sink,window,heavy,evict_period,tag,source_file,n,success_rate,timeout_rate,avg_turns
+h2o,1,10,4,64,32,1,task10,stress_h2o_1x10_s4_w64_h32_ep1_task10.json,2,1.0,0.0,17.0
+h2o,1,10,4,64,32,1,task10_1st,stress_h2o_1x10_s4_w64_h32_ep1_task10_1st.json,10,0.4,0.6,43.9
+h2o,1,10,4,64,32,2,task10_1st,stress_h2o_1x10_s4_w64_h32_ep2_task10_1st.json,10,0.6,0.4,53.9
+h2o,1,10,4,64,32,4,task10_1st,stress_h2o_1x10_s4_w64_h32_ep4_task10_1st.json,10,0.6,0.4,38.6
+h2o,1,10,4,64,32,8,task10_1st,stress_h2o_1x10_s4_w64_h32_ep8_task10_1st.json,10,0.7,0.3,36.0
+h2o,1,10,4,64,32,12,task10_1st,stress_h2o_1x10_s4_w64_h32_ep12_task10_1st.json,10,0.9,0.1,32.6
+h2o,1,10,4,64,32,16,task10_1st,stress_h2o_1x10_s4_w64_h32_ep16_task10_1st.json,10,0.8,0.2,34.6

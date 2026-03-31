@@ -75,6 +75,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--h2o-local-window-size", type=int, default=256)
     parser.add_argument("--h2o-heavy-hitter-size", type=int, default=128)
     parser.add_argument("--save-step-trace", action="store_true")
+    parser.add_argument(
+        "--attn-implementation", type=str, default="auto",
+        choices=["auto", "eager", "sdpa", "flash_attention_2"],
+        help="Attention implementation. 'auto' uses sdpa for baseline/streamingllm "
+             "and eager for h2o (which needs output_attentions).",
+    )
     parser.add_argument("--_child-run", action="store_true", help=argparse.SUPPRESS)
     return parser
 
@@ -293,6 +299,7 @@ def _build_child_command(args: argparse.Namespace, method: str) -> list[str]:
     cmd.extend(["--h2o-heavy-hitter-size", str(args.h2o_heavy_hitter_size)])
     if args.save_step_trace:
         cmd.append("--save-step-trace")
+    cmd.extend(["--attn-implementation", args.attn_implementation])
 
     cmd.append("--_child-run")
     return cmd
@@ -343,6 +350,15 @@ def main() -> None:
     if not samples:
         raise ValueError(f"No samples found for dataset: {dataset_desc}")
 
+    # Resolve attention implementation
+    attn_impl = args.attn_implementation
+    if attn_impl == "auto":
+        method_set = {m.lower() for m in methods}
+        if "h2o" in method_set:
+            attn_impl = "eager"
+        else:
+            attn_impl = "sdpa"
+
     from src.api import OracleKVProjectAPI
 
     api = OracleKVProjectAPI(
@@ -352,6 +368,7 @@ def main() -> None:
         dtype=args.dtype,
         trust_remote_code=args.trust_remote_code,
         allow_remote_files=args.allow_remote_files,
+        attn_implementation=attn_impl,
     )
     method_configs = build_method_configs(args)
 
