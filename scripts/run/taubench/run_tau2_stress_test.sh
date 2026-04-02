@@ -47,6 +47,12 @@ GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.9}"
 DEVICE="${DEVICE:-cuda}"
 DTYPE="${DTYPE:-auto}"
 PHASE="${PHASE:-0}"  # 0=all, 1/2=specific phase
+SAVE_TAG="${SAVE_TAG:-}"
+H2O_PREFILL_SCORE_MODE="${H2O_PREFILL_SCORE_MODE:-role_decay}"
+H2O_ROLE_PRIOR_SCALE="${H2O_ROLE_PRIOR_SCALE:-1.0}"
+H2O_RESURFACE_SCALE="${H2O_RESURFACE_SCALE:-1.25}"
+H2O_RESURFACE_TOP_K="${H2O_RESURFACE_TOP_K:-2}"
+H2O_RESURFACE_MIN_OVERLAP="${H2O_RESURFACE_MIN_OVERLAP:-0.1}"
 
 # GPU assignments (override as needed)
 GPU_A="${GPU_A:-2}"
@@ -121,21 +127,26 @@ run_config() {
 
   case "$method" in
     baseline)
-      save_to="stress_baseline_${NUM_TRIALS}x${NUM_TASKS}"
+      save_to="stress_baseline_${NUM_TRIALS}x${NUM_TASKS}${SAVE_TAG:+_${SAVE_TAG}}"
       ;;
     streamingllm)
-      save_to="stress_streamingllm_${NUM_TRIALS}x${NUM_TASKS}_${SINK_SIZE}_${WINDOW_SIZE}"
+      save_to="stress_streamingllm_${NUM_TRIALS}x${NUM_TASKS}_${SINK_SIZE}_${WINDOW_SIZE}${SAVE_TAG:+_${SAVE_TAG}}"
       method_extra_args+=(
         --streaming-sink-size "$SINK_SIZE"
         --streaming-local-window-size "$WINDOW_SIZE"
       )
       ;;
     h2o)
-      save_to="stress_h2o_${NUM_TRIALS}x${NUM_TASKS}_${SINK_SIZE}_${WINDOW_SIZE}_${heavy}"
+      save_to="stress_h2o_${NUM_TRIALS}x${NUM_TASKS}_${SINK_SIZE}_${WINDOW_SIZE}_${heavy}${SAVE_TAG:+_${SAVE_TAG}}"
       method_extra_args+=(
         --h2o-sink-size "$SINK_SIZE"
         --h2o-local-window-size "$WINDOW_SIZE"
         --h2o-heavy-hitter-size "$heavy"
+        --h2o-prefill-score-mode "$H2O_PREFILL_SCORE_MODE"
+        --h2o-role-prior-scale "$H2O_ROLE_PRIOR_SCALE"
+        --h2o-resurface-scale "$H2O_RESURFACE_SCALE"
+        --h2o-resurface-top-k "$H2O_RESURFACE_TOP_K"
+        --h2o-resurface-min-overlap "$H2O_RESURFACE_MIN_OVERLAP"
       )
       ;;
   esac

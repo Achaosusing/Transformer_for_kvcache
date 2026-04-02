@@ -1,0 +1,9 @@
+score_mode,fine_role,samples,reactivated_messages,reactivated_as_heavy_messages,avg_kept_fraction,avg_heavy_kept_fraction
+role_decay,asst_gen,4,0,0,0.25,0.25
+role_decay,asst_greeting,2,0,0,1.0,1.0
+role_decay,asst_tool_call,1,0,1,1.0,1.0
+role_decay,user_msg,7,0,0,0.3541666666666667,0.2113095238095238
+zero,asst_gen,4,0,0,0.4423076923076923,0.4423076923076923
+zero,asst_greeting,2,0,0,0.36363636363636365,0.0
+zero,asst_tool_call,1,0,0,0.0,0.0
+zero,user_msg,7,0,1,0.3484320557491289,0.20557491289198607

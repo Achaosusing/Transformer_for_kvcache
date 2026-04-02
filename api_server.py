@@ -118,15 +118,21 @@ def main() -> None:
     # Resolve attention implementation
     attn_impl = args.attn_implementation
     if attn_impl == "auto":
-        if fixed_method == "h2o":
-            # H2O needs output_attentions=True at decode time, which requires
-            # eager. Prefill no longer requests output_attentions so there is
-            # no O(N^2) spike; the QK^T matrix for one full-attention layer
-            # is allocated transiently (~30 GB bf16 at 32k) and freed before
-            # the next layer, keeping peak well within GPU budget.
-            attn_impl = "eager"
-        else:
-            attn_impl = "sdpa"  # baseline/streamingllm → use SDPA for speed
+        # Always use sdpa for all methods including H2O.
+        #
+        # HuggingFace attention modules follow the pattern:
+        #   if attn_impl == "sdpa" and not output_attentions:
+        #       return F.scaled_dot_product_attention(...)   # no N×N matrix
+        #   else:
+        #       return manual_eager_attention(...)           # materializes N×N
+        #
+        # H2O prefill calls with output_attentions=False → sdpa path → safe.
+        # H2O decode calls with output_attentions=True → eager fallback, but
+        # query is only 1 token so the matrix is [1, H, 1, cache_budget] ≈ tiny.
+        #
+        # Using eager globally would force a [1, H, 32000, 32000] bf16+fp32
+        # materialization during prefill (~108 GB peak), causing OOM on 80 GB.
+        attn_impl = "sdpa"
 
     # Resolve collect_period
     collect_period = args.collect_period if args.collect_period > 0 else args.evict_period

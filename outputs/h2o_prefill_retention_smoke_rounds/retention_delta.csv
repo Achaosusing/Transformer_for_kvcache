@@ -1,0 +1,14 @@
+fine_role,assistant_turn_distance,role_decay,zero,delta_role_decay_minus_zero
+asst_greeting,3,1.0,0.0,1.0
+asst_tool_call,1,1.0,0.0,1.0
+asst_greeting,4,1.0,0.0,1.0
+user_msg,3,0.23958333333333334,0.0,0.23958333333333334
+asst_gen,3,0.0,0.0,0.0
+user_msg,0,0.0,0.0,0.0
+user_msg,2,0.5,0.5,0.0
+asst_gen,1,1.0,1.0,0.0
+asst_tool_call,0,0.0,0.0,0.0
+user_msg,4,0.0,0.0,0.0
+user_msg,1,0.0,0.21951219512195122,-0.21951219512195122
+asst_gen,2,0.0,0.38461538461538464,-0.38461538461538464
+asst_gen,0,0.15217391304347827,1.0,-0.8478260869565217
