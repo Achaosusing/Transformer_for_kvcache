@@ -191,20 +191,20 @@ class OracleKVProjectAPI:
         evict_period: int = 1,
         collect_period: int = 1,
     ) -> tuple[list[int], list[StepTrace]]:
-        # H2O = StreamingLLM (sink + window) + heavy-hitter (topk from middle).
-        # Prefill with ALL prompt tokens so attention scores cover the full
-        # prompt — heavy-hitters are selected from actual attention, not zeros.
-        cached_logits, past_key_values, attention_scores = (
-            self.model.prefill_next_token_logits_with_attention(token_ids)
-        )
+        # Standard H2O: prefill WITHOUT attention output (avoids O(N²) memory
+        # spike from materializing full attention matrices).  Heavy-hitter
+        # scores are accumulated incrementally during decode steps only.
+        cached_logits, past_key_values = self.model.prefill_next_token_logits(token_ids)
 
-        device = attention_scores.device
-        score_counters = attention_scores.clone()
+        device = self.model.model.device
         active_token_count = len(token_ids)
+        score_counters = torch.zeros(active_token_count, dtype=torch.float32, device=device)
         _zero = torch.zeros(1, dtype=score_counters.dtype, device=device)
 
-        # Initial pruning: use H2O policy (sink + topk heavy-hitters + window)
-        # based on real attention scores from the full prompt.
+        # Initial pruning: scores are zero so heavy-hitter selection falls
+        # back to recency tiebreaker (effectively sink + window).  Real
+        # heavy-hitter selection kicks in once decode-time attention
+        # scores have been accumulated.
         if active_token_count > policy.cache_budget:
             keep_tensor = policy.select_keep_tensor(active_token_count, score_counters)
             score_counters = score_counters[keep_tensor]

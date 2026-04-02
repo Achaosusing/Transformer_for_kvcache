@@ -15,6 +15,22 @@ class _CacheWithLists:
         self.value_cache = value_cache
 
 
+class _DynamicLayer:
+    def __init__(self, keys, values) -> None:
+        self.keys = keys
+        self.values = values
+
+
+class _LinearAttentionLayer:
+    def __init__(self, conv_states) -> None:
+        self.conv_states = conv_states
+
+
+class _CacheWithLayers:
+    def __init__(self, layers) -> None:
+        self.layers = layers
+
+
 def _make_model() -> LocalTransformerModel:
     model = LocalTransformerModel.__new__(LocalTransformerModel)
     model.model = _DummyModel()
@@ -67,3 +83,23 @@ def test_prune_legacy_cache_supports_none_entries() -> None:
     assert pruned[0][0].shape[2] == 3
     assert pruned[0][1] is None
     assert pruned[0][2] == "meta"
+
+
+def test_prune_layered_cache_skips_linear_attention_layers() -> None:
+    model = _make_model()
+
+    keys = torch.randn(1, 2, 5, 4)
+    values = torch.randn(1, 2, 5, 4)
+    conv_states = torch.randn(1, 8, 4)
+    cache = _CacheWithLayers(
+        layers=[
+            _DynamicLayer(keys.clone(), values.clone()),
+            _LinearAttentionLayer(conv_states.clone()),
+        ]
+    )
+
+    pruned = model.prune_past_key_values(cache, [0, 2, 4])
+
+    assert pruned.layers[0].keys.shape[2] == 3
+    assert pruned.layers[0].values.shape[2] == 3
+    assert torch.equal(pruned.layers[1].conv_states, conv_states)

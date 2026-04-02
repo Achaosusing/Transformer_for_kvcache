@@ -1,0 +1,124 @@
+`torch_dtype` is deprecated! Use `dtype` instead!
+The fast path is not available because one of the required library is not installed. Falling back to torch implementation. To install follow https://github.com/fla-org/flash-linear-attention#installation and https://github.com/Dao-AILab/causal-conv1d
+Loading weights:   0%|          | 0/427 [00:00<?, ?it/s]Loading weights:  89%|████████▉ | 381/427 [00:00<00:00, 3808.52it/s]Loading weights: 100%|██████████| 427/427 [00:00<00:00, 3977.95it/s]
+INFO:     Started server process [3621049]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8063 (Press CTRL+C to quit)
+INFO:     127.0.0.1:58466 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58490 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58482 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39754 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58490 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58482 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39754 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58490 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39754 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58482 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58490 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39754 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58482 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58490 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39754 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58482 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58490 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58482 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60636 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48522 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58482 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60636 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48522 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58482 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60636 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48522 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58482 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60636 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59616 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58482 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60636 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59616 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58482 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60636 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59616 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49346 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60636 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59616 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60636 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49346 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59616 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60636 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49346 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59616 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60636 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49346 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59616 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49346 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60636 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59616 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60636 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59616 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54712 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59616 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60636 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54712 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60636 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54712 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40156 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60636 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54712 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40156 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54712 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59612 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40156 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40156 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59612 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52416 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40156 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59612 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52416 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40156 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59612 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52416 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45026 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40156 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59612 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40156 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59612 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44784 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40156 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58284 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59612 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40156 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59612 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40156 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59612 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59612 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59612 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59612 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59612 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59612 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59612 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59612 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59612 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59612 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59612 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59612 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59612 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59612 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59612 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48234 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48234 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48234 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48234 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48234 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48234 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48234 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48234 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48234 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48234 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48234 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48234 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [3621049]

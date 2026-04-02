@@ -14,6 +14,12 @@ resolution-markers = [
     "python_full_version < '3.11'",
 ]
 
+[manifest]
+members = [
+    "opencompass",
+    "oracle-kv-token-eval",
+]
+
 [[package]]
 name = "addict"
 version = "2.4.0"
@@ -2062,6 +2068,11 @@ sdist = { url = "https://files.pythonhosted.org/packages/b4/15/203d537e58986b567
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d0/b1/35b6f9c8cf9318e3dbb7146cc82dab4cf61182a8d5406fc9b50864362895/openai-2.29.0-py3-none-any.whl", hash = "sha256:b7c5de513c3286d17c5e29b92c4c98ceaf0d775244ac8159aeb1bddf840eb42a", size = 1141533, upload-time = "2026-03-17T17:53:47.348Z" },
 ]
+
+[[package]]
+name = "opencompass"
+version = "0.1.0"
+source = { virtual = "opencompass" }
 
 [[package]]
 name = "opentelemetry-api"

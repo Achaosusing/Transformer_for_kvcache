@@ -119,7 +119,12 @@ def main() -> None:
     attn_impl = args.attn_implementation
     if attn_impl == "auto":
         if fixed_method == "h2o":
-            attn_impl = "eager"  # H2O needs output_attentions → must use eager
+            # H2O needs output_attentions=True at decode time, which requires
+            # eager. Prefill no longer requests output_attentions so there is
+            # no O(N^2) spike; the QK^T matrix for one full-attention layer
+            # is allocated transiently (~30 GB bf16 at 32k) and freed before
+            # the next layer, keeping peak well within GPU budget.
+            attn_impl = "eager"
         else:
             attn_impl = "sdpa"  # baseline/streamingllm → use SDPA for speed
 

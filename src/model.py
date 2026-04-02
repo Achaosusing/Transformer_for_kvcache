@@ -261,10 +261,11 @@ class LocalTransformerModel:
         if cache_tensor.ndim < 3:
             raise ValueError("Unsupported cache tensor rank")
 
+        seq_dim = cache_tensor.ndim - 2
         keep = keep_indices.to(device=cache_tensor.device, dtype=torch.long)
         if keep.numel() > 0:
-            keep = keep[(keep >= 0) & (keep < cache_tensor.shape[2])]
-        return cache_tensor.index_select(2, keep)
+            keep = keep[(keep >= 0) & (keep < cache_tensor.shape[seq_dim])]
+        return cache_tensor.index_select(seq_dim, keep)
 
     def prune_past_key_values(
         self,
@@ -283,6 +284,14 @@ class LocalTransformerModel:
                     past_key_values.value_cache[layer_idx],
                     keep_tensor,
                 )
+            return past_key_values
+
+        if hasattr(past_key_values, "layers"):
+            for layer in past_key_values.layers:
+                if hasattr(layer, "keys"):
+                    layer.keys = self._prune_cache_tensor(layer.keys, keep_tensor)
+                if hasattr(layer, "values"):
+                    layer.values = self._prune_cache_tensor(layer.values, keep_tensor)
             return past_key_values
 
         legacy_cache = past_key_values.to_legacy_cache() if hasattr(past_key_values, "to_legacy_cache") else past_key_values
