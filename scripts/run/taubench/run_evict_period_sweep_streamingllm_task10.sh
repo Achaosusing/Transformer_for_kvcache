@@ -8,12 +8,12 @@ set -euo pipefail
 # Runs sequentially on one GPU to avoid VRAM conflicts.
 #
 # Usage:
-#   bash scripts/run/run_evict_period_sweep_streamingllm_task10.sh
+#   bash scripts/run/taubench/run_evict_period_sweep_streamingllm_task10.sh
 #
 # Key overrides:
-#   GPU=3 bash scripts/run/run_evict_period_sweep_streamingllm_task10.sh
-#   EVICT_PERIODS="1 4 16" bash scripts/run/run_evict_period_sweep_streamingllm_task10.sh
-#   WINDOW_SIZE=64 bash scripts/run/run_evict_period_sweep_streamingllm_task10.sh
+#   GPU=3 bash scripts/run/taubench/run_evict_period_sweep_streamingllm_task10.sh
+#   EVICT_PERIODS="1 4 16" bash scripts/run/taubench/run_evict_period_sweep_streamingllm_task10.sh
+#   WINDOW_SIZE=64 bash scripts/run/taubench/run_evict_period_sweep_streamingllm_task10.sh
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../" && pwd)"
 cd "$ROOT_DIR"
@@ -128,8 +128,8 @@ run_one_evict_period() {
     --port "$PORT" \
     --method streamingllm \
     --evict-period "$evict_period" \
-    --streamingllm-sink-size "$SINK_SIZE" \
-    --streamingllm-local-window-size "$WINDOW_SIZE" \
+    --streaming-sink-size "$SINK_SIZE" \
+    --streaming-local-window-size "$WINDOW_SIZE" \
     >"./outputs/${save_to}_server.log" 2>&1 &
 
   server_pid=$!
@@ -188,5 +188,5 @@ echo "=============================================================="
 echo "All evict_period configs done."
 echo "Results in: ./outputs/stress_streamingllm_*_ep*_task10*"
 echo "Then analyze with:"
-echo "  python scripts/analyze/analyze_evict_period_sweep.py"
+echo "  python scripts/analyze/taubench/analyze_evict_period_sweep.py"
 echo "=============================================================="

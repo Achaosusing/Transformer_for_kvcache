@@ -17,8 +17,8 @@ set -euo pipefail
 #   Batches : 3  (one per trial, 6-way parallel each)
 #
 # Usage:
-#   bash scripts/run/run_sl_w512_ep_sweep.sh
-#   DRY_RUN=1 bash scripts/run/run_sl_w512_ep_sweep.sh
+#   bash scripts/run/taubench/run_sl_w512_ep_sweep.sh
+#   DRY_RUN=1 bash scripts/run/taubench/run_sl_w512_ep_sweep.sh
 # ══════════════════════════════════════════════════════════════════════════════
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../" && pwd)"
@@ -250,7 +250,7 @@ echo "║  Total / Completed / Failed : $TOTAL / $COMPLETED / $FAILED"
 echo "║  Elapsed : $(( ELAPSED/60 )) min (${ELAPSED}s)"
 echo "║"
 echo "║  Run analysis after completion:"
-echo "║    python scripts/analyze/analyze_sl_w512_ep_effect.py"
+echo "║    python scripts/analyze/taubench/analyze_evict_period_sweep.py"
 echo "╚══════════════════════════════════════════════════════════════╝"
 
 [[ $FAILED -gt 0 ]] && exit 1 || exit 0

@@ -18,11 +18,11 @@ set -euo pipefail
 # 两张 GPU 并行 → ~10 batches，预计 3-4 小时
 #
 # Usage:
-#   bash scripts/run/run_3d_sweep_task10.sh
+#   bash scripts/run/taubench/run_3d_sweep_task10.sh
 #
 # Overrides:
-#   GPU_A=2 GPU_B=3 bash scripts/run/run_3d_sweep_task10.sh
-#   DRY_RUN=1 bash scripts/run/run_3d_sweep_task10.sh   # 只打印不执行
+#   GPU_A=2 GPU_B=3 bash scripts/run/taubench/run_3d_sweep_task10.sh
+#   DRY_RUN=1 bash scripts/run/taubench/run_3d_sweep_task10.sh   # 只打印不执行
 # ══════════════════════════════════════════════════════════════════════════════
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../" && pwd)"
@@ -339,7 +339,7 @@ echo "║"
 echo "║  Results in: ./outputs/sweep3d_*_${TASK_TAG}*"
 echo "║"
 echo "║  Next step — analyze:"
-echo "║    python scripts/analyze/analyze_3d_sweep.py"
+echo "║    python scripts/analyze/taubench/analyze_3d_sweep.py"
 echo "╚══════════════════════════════════════════════════════════════╝"
 
 if [[ $FAILED -gt 0 ]]; then

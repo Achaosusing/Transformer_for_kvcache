@@ -10,8 +10,8 @@ set -euo pipefail
 #   Naming      : sl_s4_w{window}_ep{ep}_task10
 #
 # Usage:
-#   bash scripts/run/run_sl_full_sweep_task10.sh
-#   DRY_RUN=1 bash scripts/run/run_sl_full_sweep_task10.sh
+#   bash scripts/run/taubench/run_sl_full_sweep_task10.sh
+#   DRY_RUN=1 bash scripts/run/taubench/run_sl_full_sweep_task10.sh
 # ══════════════════════════════════════════════════════════════════════════════
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../" && pwd)"
@@ -255,7 +255,7 @@ echo "║  Elapsed : $(( ELAPSED/60 )) min (${ELAPSED}s)"
 echo "║"
 echo "║  New results in : ./outputs/sl_s4_w*_ep*_task10*"
 echo "║  Combined analysis (includes sweep3d):"
-echo "║    python scripts/analyze/analyze_sl_full_sweep.py"
+echo "║    python scripts/analyze/taubench/analyze_sl_full_sweep.py"
 echo "╚══════════════════════════════════════════════════════════════╝"
 
 [[ $FAILED -gt 0 ]] && exit 1 || exit 0

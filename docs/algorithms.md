@@ -1,8 +1,6 @@
 # baseline、streamingLLM、h2o 算法说明
 
-本文说明项目中三种 KV Cache 策略的算法定义、统一执行框架和关键实现细节。
-
-对应代码位置：
+本文档以当前代码实现为准，重点对应以下文件：
 
 - `src/methods/baseline.py`
 - `src/methods/streaming_llm.py`
@@ -10,168 +8,144 @@
 - `src/api.py`
 - `src/model.py`
 
+如果旧说明里还写着“h2o 在 full prompt prefill 时读取 attention，并用真实 prompt attention 做首次 heavy-hitter 打分”，那已经不是当前主执行路径。
+
 ## 1. 统一执行框架
 
-统一流程在 `src/api.py` 中实现：
+三种方法共享同一套高层流程：
 
-1. 先把输入文本转换成 `full_ids`。
-2. baseline / streamingLLM 会先决定初始保留 token；h2o 会先对 full prompt 做一次带 attention 的 prefill。
-3. 得到：
-   - 下一 token 的 logits
-   - `past_key_values`
-  - （h2o）当前活动 cache 上的 attention 聚合分数
-4. 进入逐步解码循环。
-5. 每一步：
-   - 从 logits 采样下一个 token
-   - 把该 token 追加到输出序列
-   - 使用 `past_key_values` 做一次增量前向
-   - 更新 logits 和 cache
+1. `normalize_sample(...)` 统一样本格式。
+2. `LocalTransformerModel.format_prompt_ids(...)` 把 `prompt` 或 `messages` 转成 token ids。
+3. `OracleKVProjectAPI._build_policy(...)` 根据方法和配置构建 policy。
+4. 进入具体方法的生成路径。
 
-在代码里，这个统一框架分成三条路径：
+当前三条主路径分别是：
 
 - baseline：`OracleKVProjectAPI._generate_with_manual_cache`
 - streamingLLM：`OracleKVProjectAPI._generate_with_streaming_cache`
 - h2o：`OracleKVProjectAPI._generate_with_h2o`
 
-三条路径的共同点是：
+这些路径共用的底层模型操作有：
 
-1. 都使用 `prefill_next_token_logits(...)` 或它的 attention 版来初始化 cache。
-2. 都使用 `next_token_logits_from_cache(...)` 或它的 attention 版进行增量解码。
-3. 都调用同一个 `sample_next_token(...)` 做采样。
-4. streamingLLM 和 h2o 都在解码过程中持续维护 cache 预算约束。
+- `prefill_next_token_logits(...)`
+- `next_token_logits_from_cache(...)`
+- `next_token_logits_from_cache_with_attention(...)`
+- `prune_past_key_values(...)`
+- `sample_next_token(...)`
 
-因此三者在模型、采样逻辑、增量缓存使用方式上保持同一大框架，主要差异集中在"哪些 token 被保留在 KV Cache 中"以及"如何决定淘汰哪些 token"。
+需要特别说明的是：
+
+- `prefill_next_token_logits_with_attention(...)` 虽然仍然存在于 `src/model.py`，但当前主执行路径并不使用它。
+- `save_step_trace=True` 只会额外记录 `full_context_tokens`、`kept_tokens` 和 `kept_ratio`，不会改变实际裁剪逻辑。
 
 ## 2. baseline
 
 ### 2.1 算法定义
 
-baseline 是 full-context 策略，不丢弃任何 token。
-
-它的 policy 很简单：
+baseline 是 full-context 策略，不丢弃任何 token：
 
 $$
 \text{Keep}(t) = \{0, 1, 2, \dots, t-1\}
 $$
 
-也就是说，在长度为 $t$ 的上下文里，全部 token 都保留。
+### 2.2 当前实现
 
-### 2.2 实现位置
+在 `src/api.py` 中，baseline 会直接把完整 `full_ids` 送入 `_generate_with_manual_cache(...)`：
 
-在 `src/methods/baseline.py` 中：
+1. 对完整 prompt 做一次普通 prefill
+2. 获得下一 token 的 logits 和 `past_key_values`
+3. 进入逐步 decode
+4. 每一步都只在现有 cache 基础上追加，不做裁剪
 
-- `BaselineFullAttentionPolicy.select_keep_indices(...)`
-
-其行为是直接返回 `range(total_tokens)`。
-
-### 2.3 运行方式
-
-在 `src/api.py` 中，baseline 的执行流程是：
-
-1. `pruned_ids = full_ids`
-2. 用 `_generate_with_manual_cache(...)` 进入统一逐步解码
-
-因此 baseline 的特征是：
-
-1. 初始 prompt 完整进入 KV Cache。
-2. 后续生成出的 token 也持续追加到 cache 中。
-3. 没有任何裁剪或淘汰逻辑。
-
-### 2.4 特点
+### 2.3 特点
 
 优点：
 
 1. 最接近标准自回归解码。
-2. 语义信息最完整。
-3. 作为对比基线最直接。
+2. 没有任何近似裁剪带来的信息损失。
+3. 是最直接的对照基线。
 
-缺点：
+代价：
 
-1. KV Cache 会随上下文长度持续增长。
-2. 长上下文下显存和计算开销最大。
+1. KV cache 会随上下文持续增长。
+2. 长上下文下显存与计算开销最大。
 
 ## 3. streamingLLM
 
 ### 3.1 算法定义
 
-streamingLLM 的基本思想是只保留两类 token：
+streamingLLM 只保留两类 token：
 
 1. Sink Tokens：序列最前面的若干 token
 2. Recent Tokens：序列末尾最近的若干 token
 
-因此它的缓存结构是：
+其缓存结构为：
 
 $$
 \text{KV Cache} = \text{Sink Tokens} + \text{Recent Tokens}
 $$
 
-其中：
+预算为：
 
-- `sink_size` 控制前缀保留数量
-- `local_window_size` 控制最近窗口大小
+$$
+\text{Budget} = \text{sink\_size} + \text{local\_window\_size}
+$$
 
-### 3.2 实现位置
+### 3.2 Prompt 阶段
 
-在 `src/methods/streaming_llm.py` 中：
+当前实现会先调用 `prune_streaming_prompt(full_ids, policy)`，把完整 prompt 静态裁成：
 
-- `StreamingLLMPolicy.select_keep_indices(...)`
+- 前缀 `sink_size` 个 token
+- 末尾 `local_window_size` 个 token
 
-具体做法是：
+然后再对裁剪后的 `pruned_ids` 做 prefill。
 
-1. 计算 `sink_end = min(sink_size, total_tokens)`
-2. 计算 `tail_start = max(sink_end, total_tokens - local_window_size)`
-3. 保留：
-   - `[0, sink_end)`
-   - `[tail_start, total_tokens)`
-4. 强制把最后一个 token 加入保留集
+### 3.3 Decode 阶段
 
-### 3.3 运行方式
+生成过程中，`_generate_with_streaming_cache(...)` 会持续检查 budget：
 
-在 `src/api.py` 中，streamingLLM 的执行流程是：
+1. 当前活动 cache token 数记为 `active_token_count`
+2. 新 token 加入后的数量记为 `next_total = active_token_count + 1`
+3. 当 `next_total > cache_budget + evict_period - 1` 时触发裁剪
+4. 裁剪时保留：
+   - 固定 sink 区间
+   - 最新的 recent tail
 
-1. 对 `full_ids` 调用 policy 选出初始 `keep_idx`
-2. 生成 `pruned_ids = [full_ids[i] for i in keep_idx]`
-3. 将 `pruned_ids` 送入 `_generate_with_streaming_cache(...)`
+因此：
 
-执行细节：
-
-1. streamingLLM 先对初始 prompt 做一次静态裁剪，保留 sink + recent window 内的 token。
-2. 进入逐步解码后，每步检查 cache 是否超出预算（`cache_budget = sink_size + local_window_size`）。
-3. 若超出预算，直接按位置裁剪 cache：保留 sink，并在非 sink 区域丢弃最旧的 `excess` 个 token。
-4. 这使得 streamingLLM 的 cache 大小在整个生成过程中保持稳定，与 h2o 一样受预算约束。
+- `evict_period = 1` 时，cache 会严格保持在预算内。
+- `evict_period > 1` 时，cache 允许临时超预算最多 `evict_period - 1` 个 token，以减少裁剪频率。
 
 ### 3.4 特点
 
 优点：
 
-1. 结构简单。
-2. 初始 cache 大小容易控制。
-3. 很适合作为“仅靠 recency + sink”的对照方法。
+1. 实现简单。
+2. cache 预算稳定且可解释。
+3. 很适合作为“只靠 recency + sink”的对照方法。
 
-缺点：
+限制：
 
 1. 中间历史 token 会整体丢弃。
-2. 无法保留那些虽然较早但持续重要的 token。
+2. 无法保留那些虽不在 recent window 内、但长期重要的 token。
 
 ## 4. h2o
 
 ### 4.1 算法定义
 
-h2o 在 streamingLLM 的基础上增加了 Heavy Hitters。
+h2o 在 streamingLLM 的基础上增加 Heavy Hitters：
 
-它的思想是：
+1. Sink Tokens 必保留
+2. Recent Tokens 必保留
+3. 中间区域按累计分数选出 `heavy_hitter_size` 个高分 token
 
-1. Sink Tokens 必保留。
-2. Recent Tokens 必保留。
-3. 其余普通 token 根据历史累计注意力得分决定是否保留。
-
-因此它的缓存结构可以写成：
+缓存结构可写为：
 
 $$
 \text{KV Cache} = \text{Sink Tokens} + \text{Heavy Hitters} + \text{Recent Tokens}
 $$
 
-缓存总预算为：
+预算为：
 
 $$
 \text{Budget} = \text{sink\_size} + \text{local\_window\_size} + \text{heavy\_hitter\_size}
@@ -179,179 +153,183 @@ $$
 
 ### 4.2 Score 计数器
 
-h2o 的核心是每个缓存 token 都有一个 score 计数器 $S_i$。
+h2o 的核心是活动 cache 中每个 token 都维护一个累计分数 $S_i$。
 
-#### 初始化
-
-当 token 进入当前活动 cache 时，初始化：
+当 token 进入当前活动 cache 时：
 
 $$
 S_i = 0
 $$
 
-#### 每步更新
-
-在第 $t$ 步解码时，当前 query 会对 cache 中所有 key 产生注意力权重。项目里的实现做的是：
-
-1. 读取模型返回的每层 attention
-2. 取最后一个 query 对所有 key 的注意力
-3. 在 head 维上求平均
-4. 再在 layer 维上求平均
-
-对应的聚合结果记作 $s_{t,i}$，随后更新：
+当某个 decode step 触发 attention 收集时，当前 query 对所有 key 的注意力会被聚合成一个向量 $s_{t,i}$，随后更新：
 
 $$
 S_i^{(t)} = S_i^{(t-1)} + s_{t,i}
 $$
 
-这表示：如果一个 token 在很多步里持续被关注，它的累计分数会越来越高。
+当前聚合方式来自 `LocalTransformerModel._aggregate_last_query_attention(...)`：
 
-### 4.3 实现位置
+1. 取最后一个 query 对所有 key 的注意力行
+2. 先在 head 维求平均
+3. 再在有效 layer 维求平均
 
-#### policy 部分
+### 4.3 当前主执行路径
 
-在 `src/methods/h2o.py` 中：
+当前 `OracleKVProjectAPI._generate_with_h2o(...)` 的真实执行步骤是：
 
-- `select_streaming_keep_indices(...)`
-  - 提供 streamingLLM 风格保留索引的辅助函数（当前主执行路径未直接调用）
-- `select_keep_indices(...)`
-  - 当 cache 超预算时，决定保留哪些 token
+1. 对完整 prompt 调用 `prefill_next_token_logits(token_ids)`
+2. 这一步不会请求 `output_attentions=True`
+3. 用全零 `score_counters` 初始化当前活动 cache
+4. 如果 prompt 已经超过预算，则立刻按当前零分计数器做一次初始裁剪
+5. 进入逐步 decode
+6. 每一步先采样下一个 token
+7. 若“加入新 token 后”会超过 `budget + evict_period - 1`，则先裁剪旧 cache
+8. 给新 token 追加一个零分计数器
+9. 只有在以下任一条件满足时，才调用 `next_token_logits_from_cache_with_attention(...)`：
+   - 本步需要裁剪
+   - 自上次 attention 收集以来已经过了 `collect_period` 步
 
-#### 运行时部分
+这意味着当前 h2o 是“decode-time online scoring”，不是“prompt-time full-attention scoring”。
 
-在 `src/api.py` 中：
+### 4.4 首次裁剪为什么不是 prompt attention 驱动
 
-- `_generate_with_h2o(...)`
-  - 管理活动 cache、score 计数器和裁剪时机
-- `_accumulate_h2o_scores(...)`
-  - 把当前步 attention 聚合值累加到 score 计数器
+这是当前实现最容易被旧文档写错的地方。
 
-#### attention 读取部分
+首次裁剪发生在：
 
-在 `src/model.py` 中：
+1. prompt 已完成普通 prefill
+2. `score_counters` 刚被初始化为全零
+3. 代码调用 `policy.select_keep_tensor(active_token_count, score_counters)`
 
-- `_aggregate_last_query_attention(...)`
-  - 将多层、多头 attention 聚合成当前步每个 key token 的一个分数
-- `prefill_next_token_logits_with_attention(...)`
-  - prefill 时返回 logits、cache 和 attention 分数
-- `next_token_logits_from_cache_with_attention(...)`
-  - 增量解码时返回 logits、cache 和 attention 分数
+因为所有中间 token 的分数都相同，保留集合会退化为：
 
-#### cache 裁剪部分
+- sink tokens
+- recent window
+- 中间区里按照“更靠后优先”的极小 tie-break 选中的 token
 
-在 `src/model.py` 中：
+所以当前实现里的第一次 H2O 裁剪，本质上更接近“零分初始化下的 recency 偏置”，而不是“full prompt attention 真实打分”。
 
-- `prune_past_key_values(...)`
+### 4.5 Heavy Hitter 选择逻辑
 
-它会根据保留索引，直接在 `past_key_values` 上裁剪 key/value 张量，而不是重算整段上下文。
+在预算超限时，policy 会：
 
-### 4.4 淘汰逻辑
+1. 保护 sink 区间
+2. 保护 recent 区间
+3. 在中间候选区中按累计分数选 `top-k`
 
-当活动 cache 的 token 数量即将超过预算时：
+当前 `src/methods/h2o.py` 的 tie-break 策略是：
 
-1. 先构造一个“新 token 加入后的候选总序列长度”
-2. sink 区间和 recent 区间直接保护，不参与淘汰
-3. 在中间普通 token 中，根据 score 计数器选出最高的 `heavy_hitter_size` 个
-4. 只保留：
-   - sink tokens
-   - selected heavy hitters
-   - recent tokens
+- 如果分数相同，用一个极小的 recent 偏置把更靠后的 token 排在前面
 
-这对应于“淘汰得分最低的普通 token”的思想。
+因此 H2O 在“完全同分”场景下会偏向保留更新近的 token。
 
-### 4.5 细节补充
+### 4.6 Attention 真正何时被读取
 
-1. h2o 会先用 full prompt 做一次带 attention 的 prefill，再按 `select_keep_indices(...)` 做首次裁剪。
-2. score 计数器只对当前活动 cache 中的 token 生效。
-3. 当 token 被淘汰后，它的 score 不再保留，也不会再次进入 cache。
-4. 当前实现用的是 layer/head 平均后的 attention 累加，而不是简单的单层单头值。
-5. 在分数相同的情况下，实现中用极小的 recent tie-break 偏向更靠后的 token，以减少完全相同分数时的不稳定性。
+当前主路径不会在每一步都读取 attention。
 
-### 4.6 特点
+只有满足以下条件时才会走带 attention 的增量前向：
 
-优点：
+1. 这一步需要裁剪
+2. 或者 `steps_since_collect >= collect_period`
 
-1. 在 streamingLLM 基础上保留了“长期重要 token”。
-2. 比纯 recent window 更能覆盖远处关键信息。
-3. 通过直接裁剪 `past_key_values`，避免了旧式整段重建。
+否则会直接走 `next_token_logits_from_cache(...)`，只拿 logits 和 cache，不拿 attention。
 
-代价：
+因此：
 
-1. 需要在 h2o 路径中开启 `output_attentions=True`。
-2. 每步都要更新 score 计数器。
-3. 需要在超预算时做 cache 剪枝。
+- `collect_period = 1` 最接近“每步都在线累计 attention”
+- 更大的 `collect_period` 会减少 attention 调用次数，但分数更新也更稀疏
 
-## 5. 三种方法的对比
+### 4.7 当前实现的作用域与边界
 
-### 5.1 保留策略对比
+当前 H2O 分数只对“当前活动 cache 中仍然存活的 token”有效：
+
+1. token 被驱逐后，其分数不会保留
+2. 当前实现没有被驱逐 token 的召回
+3. 当前实现也没有对被驱逐 token 做重算或回填
+
+### 4.8 Attention 实现选择的实现细节
+
+`api_server.py` 中，`--attn-implementation auto` 会解析成 `sdpa`。
+
+这么做的原因是：
+
+1. H2O 当前 prefill 不需要 attention 输出
+2. 用 `sdpa` 可以避免长 prompt prefill 时物化巨大的 attention 矩阵
+3. 当 decode 阶段某一步需要 `output_attentions=True` 时，query 只有 1 个 token，attention 张量远小于 full prefill 场景
+
+如果你强制在长上下文上全程使用 `eager`，更容易在 prefill 阶段遇到 OOM。
+
+## 5. 三种方法对比
+
+### 5.1 保留策略
 
 1. baseline：保留全部 token
 2. streamingLLM：保留 sink + recent
 3. h2o：保留 sink + heavy hitters + recent
 
-### 5.2 动态性对比
+### 5.2 Prompt 阶段差异
 
-1. baseline：无动态裁剪
-2. streamingLLM：解码过程中持续滑动窗口裁剪（仅基于位置）
-3. h2o：解码过程中动态维护和裁剪 cache（基于位置 + 注意力得分）
+1. baseline：完整 prompt 直接 prefill
+2. streamingLLM：先静态裁 prompt，再 prefill
+3. h2o：完整 prompt 先 prefill，再按零分计数器进行必要的首次裁剪
 
-### 5.3 对实现开销的影响
+### 5.3 Decode 阶段差异
 
-1. baseline：实现最简单，cache 最大
-2. streamingLLM：实现较简单，cache 受预算约束（需要 cache 裁剪但无需 attention 聚合）
-3. h2o：实现最复杂，需要 attention 聚合、score 累计和 cache 剪枝
+1. baseline：无裁剪
+2. streamingLLM：只按位置滑窗裁剪
+3. h2o：按位置保护 + 累计分数选 heavy hitters
+
+### 5.4 实现开销
+
+1. baseline：实现最简单，但 cache 最大
+2. streamingLLM：需要裁剪 cache，但不需要维护 attention 分数
+3. h2o：需要维护 score 计数器，并在部分步上额外读取 attention
 
 ## 6. 当前实现边界
 
-当前项目的 h2o 已经是在线缓存管理版本，但仍有一些边界需要明确：
+基于 `src/methods/*.py`、`src/api.py`、`src/model.py` 的核对，当前边界如下：
 
-1. streamingLLM 在 prompt 阶段和生成阶段都做滑动窗口裁剪，cache 大小保持在 `sink_size + local_window_size` 以内。
-2. h2o 的首次 heavy hitter 选择来自 full prompt prefill 的真实 attention 聚合分数，而不是零初始化分数。
-3. h2o 的分数只来源于模型返回的 attention，不额外引入其他启发式信号。
-4. 三种方法已经统一到同一类手写逐步解码框架，但 h2o 为了实现 score 计数器，仍然必须额外读取 attention。
+1. streamingLLM 的 prompt 会在 prefill 前被静态裁剪；h2o 的 prompt 不会。
+2. H2O 的首次 heavy-hitter 选择不是来自真实 prompt attention，而是来自零初始化计数器加 recent tie-break。
+3. H2O 的分数只来自 decode-time attention，且只在选定的收集步更新。
+4. `evict_period > 1` 时，cache 会临时超预算最多 `evict_period - 1` 个 token。
+5. 当前实现没有被驱逐 token 的召回、重计算或重新注入。
+6. `select_streaming_keep_indices(...)` 和 `prefill_next_token_logits_with_attention(...)` 仍在代码里，但不是当前主执行路径。
+7. 直接通过 Python 调 `OracleKVProjectAPI.evaluate(...)` 时，默认 `collect_period=1`；通过 `api_server.py` CLI 启动服务时，默认 `--collect-period 0` 会被解析成“跟随 `evict_period`”。
 
 ## 7. 参数建议
 
 ### baseline
 
-baseline 没有算法参数，主要受模型和解码参数控制。
+baseline 没有算法级裁剪参数，主要受模型与采样参数控制。
 
 ### streamingLLM
 
-可调参数：
+重点参数：
 
 1. `sink_size`
 2. `local_window_size`
+3. `evict_period`
 
 经验上：
 
-1. `sink_size` 不宜过大，一般只需要少量前缀 token。
+1. `sink_size` 保持较小即可。
 2. `local_window_size` 决定近期上下文保留能力。
+3. 增大 `evict_period` 会提升吞吐，但 budget 约束会更松。
 
 ### h2o
 
-可调参数：
+重点参数：
 
 1. `sink_size`
 2. `local_window_size`
 3. `heavy_hitter_size`
+4. `evict_period`
+5. `collect_period`
 
 经验上：
 
 1. `heavy_hitter_size` 越大，越接近 baseline。
-2. `heavy_hitter_size` 越小，越依赖 score 计数器筛出真正重要的历史 token。
-3. 若任务对远距离依赖强，通常需要给 h2o 留出足够 heavy hitter 预算。
-
-## 8. 实现一致性检查结论
-
-基于 `src/methods/*.py`、`src/api.py`、`src/model.py` 的逐段核对，当前实现与算法思想的对应关系如下：
-
-1. baseline：一致。实现为 full-context，不做 cache 裁剪。
-2. streamingLLM：一致。实现为 sink + recent，运行时按位置丢弃最旧非 sink token，保持预算内。
-3. h2o：核心思想一致。实现为 sink + heavy hitters + recent，heavy hitters 由累计 attention 分数决定。
-
-需要特别说明的实现细节：
-
-1. h2o 的初始阶段是“full prefill + attention 打分 + 首次 h2o 裁剪”，不是“先 streaming 裁剪再打分”。
-2. h2o 在运行时会在新增 token 前按预算触发裁剪，并通过 `prune_past_key_values(...)` 直接裁剪 cache。
-3. 代码中提供了 `select_streaming_keep_indices(...)` 辅助函数，但主路径当前依赖 `select_keep_indices(...)` 完成 h2o 选择。
+2. `heavy_hitter_size` 越小，越依赖 decode-time scoring 是否能稳定找出长期重要 token。
+3. `collect_period = 1` 最接近“每步都在线更新”的 H2O。
+4. 如果优先考虑吞吐，可以一起增大 `evict_period` 和 `collect_period`，但要接受分数更新更稀疏、cache 约束更松的代价。

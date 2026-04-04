@@ -16,12 +16,12 @@ set -euo pipefail
 # Total: 6 configurations across 2 phases (up to 3 GPUs each).
 #
 # Usage:
-#   bash scripts/run_tau2_stress_test.sh              # run all phases
-#   PHASE=1 bash scripts/run_tau2_stress_test.sh      # baseline + streamingllm + h2o(heavy=64) core
-#   PHASE=2 bash scripts/run_tau2_stress_test.sh      # h2o heavy sweep: 32, 128, 256
+#   bash scripts/run/taubench/run_tau2_stress_test.sh              # run all phases
+#   PHASE=1 bash scripts/run/taubench/run_tau2_stress_test.sh      # baseline + streamingllm + h2o(heavy=64) core
+#   PHASE=2 bash scripts/run/taubench/run_tau2_stress_test.sh      # h2o heavy sweep: 32, 128, 256
 #
 # Key overrides:
-#   WINDOW_SIZE=1024 PHASE=1 bash scripts/run_tau2_stress_test.sh
+#   WINDOW_SIZE=1024 PHASE=1 bash scripts/run/taubench/run_tau2_stress_test.sh
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../" && pwd)"
 cd "$ROOT_DIR"
@@ -48,12 +48,6 @@ DEVICE="${DEVICE:-cuda}"
 DTYPE="${DTYPE:-auto}"
 PHASE="${PHASE:-0}"  # 0=all, 1/2=specific phase
 SAVE_TAG="${SAVE_TAG:-}"
-H2O_PREFILL_SCORE_MODE="${H2O_PREFILL_SCORE_MODE:-role_decay}"
-H2O_ROLE_PRIOR_SCALE="${H2O_ROLE_PRIOR_SCALE:-1.0}"
-H2O_RESURFACE_SCALE="${H2O_RESURFACE_SCALE:-1.25}"
-H2O_RESURFACE_TOP_K="${H2O_RESURFACE_TOP_K:-2}"
-H2O_RESURFACE_MIN_OVERLAP="${H2O_RESURFACE_MIN_OVERLAP:-0.1}"
-
 # GPU assignments (override as needed)
 GPU_A="${GPU_A:-2}"
 GPU_B="${GPU_B:-3}"
@@ -142,11 +136,6 @@ run_config() {
         --h2o-sink-size "$SINK_SIZE"
         --h2o-local-window-size "$WINDOW_SIZE"
         --h2o-heavy-hitter-size "$heavy"
-        --h2o-prefill-score-mode "$H2O_PREFILL_SCORE_MODE"
-        --h2o-role-prior-scale "$H2O_ROLE_PRIOR_SCALE"
-        --h2o-resurface-scale "$H2O_RESURFACE_SCALE"
-        --h2o-resurface-top-k "$H2O_RESURFACE_TOP_K"
-        --h2o-resurface-min-overlap "$H2O_RESURFACE_MIN_OVERLAP"
       )
       ;;
   esac

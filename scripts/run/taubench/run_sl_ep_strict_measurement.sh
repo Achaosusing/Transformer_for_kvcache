@@ -327,7 +327,7 @@ echo "=============================================================="
 echo "Strict measurement complete"
 echo "Total / Completed / Failed : $TOTAL / $COMPLETED / $FAILED"
 echo "Elapsed : $(( ELAPSED/60 )) min (${ELAPSED}s)"
-echo "Analyze with: python scripts/analyze/analyze_sl_ep_strict_measurement.py"
+echo "Analyze with: python scripts/analyze/taubench/analyze_sl_ep_strict_measurement.py"
 echo "=============================================================="
 
 [[ $FAILED -gt 0 ]] && exit 1 || exit 0

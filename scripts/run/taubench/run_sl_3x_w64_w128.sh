@@ -18,8 +18,8 @@ set -euo pipefail
 #   Batches : 2 batches × 3 trials = 6 batches total
 #
 # Usage:
-#   bash scripts/run/run_sl_3x_w64_w128.sh
-#   DRY_RUN=1 bash scripts/run/run_sl_3x_w64_w128.sh
+#   bash scripts/run/taubench/run_sl_3x_w64_w128.sh
+#   DRY_RUN=1 bash scripts/run/taubench/run_sl_3x_w64_w128.sh
 # ══════════════════════════════════════════════════════════════════════════════
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../" && pwd)"
@@ -250,7 +250,7 @@ echo "║  Total / Completed / Failed : $TOTAL / $COMPLETED / $FAILED"
 echo "║  Elapsed : $(( ELAPSED/60 )) min (${ELAPSED}s)"
 echo "║"
 echo "║  Run analysis after completion:"
-echo "║    python scripts/analyze/analyze_sl_3x_ep_effect.py"
+echo "║    python scripts/analyze/taubench/analyze_sl_3x_ep_effect.py"
 echo "╚══════════════════════════════════════════════════════════════╝"
 
 [[ $FAILED -gt 0 ]] && exit 1 || exit 0

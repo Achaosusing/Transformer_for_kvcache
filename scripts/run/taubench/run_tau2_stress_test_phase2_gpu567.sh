@@ -8,13 +8,13 @@ set -euo pipefail
 # (default: 5, 6, 7).
 #
 # Usage:
-#   bash scripts/run_tau2_stress_test_phase2_gpu567.sh
-#   PHASE=1 bash scripts/run_tau2_stress_test_phase2_gpu567.sh
-#   PHASE=2 bash scripts/run_tau2_stress_test_phase2_gpu567.sh
+#   bash scripts/run/taubench/run_tau2_stress_test_phase2_gpu567.sh
+#   PHASE=1 bash scripts/run/taubench/run_tau2_stress_test_phase2_gpu567.sh
+#   PHASE=2 bash scripts/run/taubench/run_tau2_stress_test_phase2_gpu567.sh
 #
 # Key overrides:
 #   GPU_A=2 GPU_B=3 GPU_C=4 GPU_D=5 GPU_E=6 GPU_F=7 \
-#   WINDOW_SIZE=1024 PHASE=2 bash scripts/run_tau2_stress_test_phase2_gpu567.sh
+#   WINDOW_SIZE=1024 PHASE=2 bash scripts/run/taubench/run_tau2_stress_test_phase2_gpu567.sh
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../" && pwd)"
 cd "$ROOT_DIR"
