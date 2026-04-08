@@ -10,3 +10,4 @@ src/oracle_kv_token_eval.egg-info/SOURCES.txt
 src/oracle_kv_token_eval.egg-info/dependency_links.txt
 src/oracle_kv_token_eval.egg-info/requires.txt
 src/oracle_kv_token_eval.egg-info/top_level.txt
+tests/test_model_cache_prune.py

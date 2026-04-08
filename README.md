@@ -110,6 +110,9 @@ python api_server.py \
   - `/v1/evaluate` 默认同时运行 `baseline`、`streamingllm`、`h2o`
   - `/v1/chat/completions` 和 `/v1/completions` 默认只运行 `baseline`
 - `/v1/chat/completions` 和 `/v1/completions` 也可以通过请求体里的 `methods` 指定多方法，此时响应里的 `choices` 会额外带上 `method` 字段。
+- `h2o` 的 `/v1/chat/completions` 现在支持可选 `session_id`。当后续请求满足“上一轮完整历史 + 严格尾部追加”时，服务端会尝试复用上一轮的 H2O 活动 KV snapshot，而不是重新 prefill 全部历史。
+- 上面的会话复用路径只在“单方法 `h2o` chat 请求”里生效；当前不支持和 `max_input_tokens` 组合使用。
+- `h2o` 的 chat 路径支持 OpenAI 风格的 `tools`、`tool_choice`（当前不支持显式对象形式的 `tool_choice`），响应里会在适用时返回 `tool_calls`。
 
 ### curl 示例
 
@@ -131,6 +134,44 @@ curl -sS -X POST "http://127.0.0.1:8000/v1/chat/completions" \
     "max_tokens": 64,
     "temperature": 0.0,
     "top_p": 1.0
+  }'
+
+# h2o + session_id + tools
+curl -sS -X POST "http://127.0.0.1:8002/v1/chat/completions" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4o",
+    "session_id": "demo-session-1",
+    "methods": ["h2o"],
+    "messages": [
+      {"role": "user", "content": "帮我查询订单 123 的状态"}
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "lookup_order",
+          "description": "查询订单状态",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "order_id": {"type": "string"}
+            },
+            "required": ["order_id"]
+          }
+        }
+      }
+    ],
+    "temperature": 0.0,
+    "top_p": 1.0,
+    "method_configs": {
+      "h2o": {
+        "sink_size": 4,
+        "local_window_size": 256,
+        "heavy_hitter_size": 128,
+        "session_score_alpha": 0.5
+      }
+    }
   }'
 
 # evaluate：一次比较三种方法
@@ -166,6 +207,7 @@ curl -sS -X POST "http://127.0.0.1:8000/v1/evaluate" \
   3. 若 prompt 已超预算，首次裁剪会退化为“零分 + recent tie-break”，效果接近 `sink + recent`
   4. 只有在 decode 过程中，且满足“本步需要裁剪”或“达到 `collect_period`”时，才会调用带 attention 的增量前向并累积分数
   5. 分数只对当前活动 cache 生效；被驱逐 token 的历史分数不会保留
+  6. `chat/completions` 的会话模式里，跨轮恢复时会先对上一轮 `score_counters` 做 Max 归一化，再乘 `session_score_alpha`，然后只对严格追加的尾部 token 做增量续写
 
 如果旧文档还写着“h2o 用 full-prompt attention 完成首次 heavy-hitter 打分”，那已经不是当前实现。
 

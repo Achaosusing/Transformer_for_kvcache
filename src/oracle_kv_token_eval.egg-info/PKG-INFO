@@ -36,27 +36,51 @@ Requires-Dist: watchdog>=6.0.0
 
 # Oracle KV Token Eval
 
-本项目提供 baseline、streamingLLM、h2o 三种 KV 保留策略，并封装了 OpenAI 风格接口。
+本仓库面向本地 Transformer 模型，提供三种 KV cache 策略的统一评测入口：
 
-算法与实现细节说明见 [docs/algorithms.md](docs/algorithms.md)。
+- `baseline`
+- `streamingllm` / `streaming_llm`
+- `h2o`
+
+当前主入口：
+
+- `api_server.py`：OpenAI 风格 HTTP 服务
+- `offline_infer.py`：离线批量推理入口
+- `src/api.py`：统一 Python 调用接口
+- [docs/algorithms.md](docs/algorithms.md)：算法与实现细节
+- [docs/attention_analysis_guide.md](docs/attention_analysis_guide.md)：attention-by-role 分析说明
 
 ## 快速开始
 
-### 1) 安装依赖
+### 推荐安装方式
 
 ```bash
-pip install -r requirements.txt
+bash scripts/run/bootstrap_all.sh
+source ./.venv/bin/activate
 ```
 
-这条命令现在会统一安装：
+这会：
 
-- 根项目运行所需依赖
-- tau2-bench 的第三方依赖
-- 本地可编辑安装的 tau2 包（等价于 `pip install -e ./tau2-bench`）
+- 创建或复用 `.venv`
+- 安装 `requirements.txt`
+- 以 editable 模式安装根项目
+- 验证 `tau2` 命令和 `src` 包可用
 
-### 2) 启动服务（baseline 示例）
+### 手动安装
 
 ```bash
+python3 -m venv .venv
+source ./.venv/bin/activate
+pip install -r requirements.txt
+pip install -e .
+```
+
+## 启动服务
+
+建议为不同方法启动不同端口，便于对比评测。
+
+```bash
+# baseline
 python api_server.py \
   --model-path ./local_models/Qwen3.5-9B \
   --served-model-name gpt-4o \
@@ -65,44 +89,65 @@ python api_server.py \
   --host 0.0.0.0 \
   --port 8000 \
   --method baseline
-```
-
-## 三种方法分别启动
-
-建议用不同端口分别启动 3 个进程，便于对比评测。
-
-```bash
-# baseline
-python api_server.py --model-path ./local_models/Qwen3.5-9B --served-model-name gpt-4o --device cuda --gpu-memory-utilization 0.9 --host 0.0.0.0 --port 8000 --method baseline
 
 # streamingLLM
-python api_server.py --model-path ./local_models/Qwen3.5-9B --served-model-name gpt-4o --device cuda --gpu-memory-utilization 0.9 --host 0.0.0.0 --port 8001 --method streamingllm
+python api_server.py \
+  --model-path ./local_models/Qwen3.5-9B \
+  --served-model-name gpt-4o \
+  --device cuda \
+  --gpu-memory-utilization 0.9 \
+  --host 0.0.0.0 \
+  --port 8001 \
+  --method streamingllm \
+  --streaming-sink-size 4 \
+  --streaming-local-window-size 256
 
 # h2o
-python api_server.py --model-path ./local_models/Qwen3.5-9B --served-model-name gpt-4o --device cuda --gpu-memory-utilization 0.9 --host 0.0.0.0 --port 8002 --method h2o
+python api_server.py \
+  --model-path ./local_models/Qwen3.5-9B \
+  --served-model-name gpt-4o \
+  --device cuda \
+  --gpu-memory-utilization 0.9 \
+  --host 0.0.0.0 \
+  --port 8002 \
+  --method h2o \
+  --h2o-sink-size 4 \
+  --h2o-local-window-size 256 \
+  --h2o-heavy-hitter-size 128 \
+  --evict-period 1 \
+  --collect-period 0
 ```
 
-## 关键参数说明
+### 服务端关键参数
 
-- --model-path: 本地模型目录。
-- --served-model-name: 对外暴露的模型名（如 gpt-4o），用于 /v1/models 和响应 model 字段。
-- --method: 固定当前服务实例的方法，可选 baseline / streamingllm / streaming_llm / h2o。
-- --gpu-memory-utilization: 单进程可用显存上限比例，范围 (0, 1]。这是上限，不会强制占满。
+- `--model-path`：本地模型目录。
+- `--served-model-name`：对外暴露给 `/v1/models` 和响应 `model` 字段的名称。
+- `--method`：固定当前服务实例的方法；可选 `baseline` / `streamingllm` / `streaming_llm` / `h2o`。
+- `--max-new-tokens`：服务端默认生成上限。
+- `--streaming-sink-size` / `--streaming-local-window-size`：streamingLLM 预算参数。
+- `--h2o-sink-size` / `--h2o-local-window-size` / `--h2o-heavy-hitter-size`：H2O 预算参数。
+- `--evict-period`：按批次裁剪 cache。`1` 表示每个 decode step 都严格裁剪；更大的值会减少裁剪开销，但允许 cache 临时超预算 `evict_period - 1` 个 token。
+- `--collect-period`：H2O 收集 attention 的步频。`0` 表示跟随 `evict_period`；`1` 表示每步收集；更大值会减少 attention 读取次数。
+- `--attn-implementation`：服务端默认 `auto`，当前会解析为 `sdpa`。这是为了避免长 prefill 时的全量 attention 矩阵 OOM。
 
 ## 接口列表
 
-- GET /health
-- GET /v1/models
-- POST /v1/chat/completions
-- POST /v1/completions
-- POST /v1/evaluate
+- `GET /health`
+- `GET /v1/models`
+- `POST /v1/chat/completions`
+- `POST /v1/completions`
+- `POST /v1/evaluate`
 
-说明：
+当前行为以 `api_server.py` 为准：
 
-- baseline、streamingLLM、h2o 现在都走手写逐步解码路径。
-- h2o 在同一解码框架上额外维护在线 score 计数器和 cache 裁剪逻辑。
+- `stream=true` 目前不支持。
+- 如果服务通过 `--method` 固定了方法，所有请求都会只走该方法。
+- 如果服务未固定方法：
+  - `/v1/evaluate` 默认同时运行 `baseline`、`streamingllm`、`h2o`
+  - `/v1/chat/completions` 和 `/v1/completions` 默认只运行 `baseline`
+- `/v1/chat/completions` 和 `/v1/completions` 也可以通过请求体里的 `methods` 指定多方法，此时响应里的 `choices` 会额外带上 `method` 字段。
 
-## curl 测试
+### curl 示例
 
 ```bash
 # 健康检查
@@ -116,38 +161,51 @@ curl -sS -X POST "http://127.0.0.1:8000/v1/chat/completions" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "gpt-4o",
-    "messages": [{"role": "user", "content": "请用一句话介绍你自己"}],
+    "messages": [
+      {"role": "user", "content": "请用一句话介绍你自己"}
+    ],
     "max_tokens": 64,
     "temperature": 0.0,
     "top_p": 1.0
   }'
 
-# completions
-curl -sS -X POST "http://127.0.0.1:8002/v1/completions" \
+# evaluate：一次比较三种方法
+curl -sS -X POST "http://127.0.0.1:8000/v1/evaluate" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gpt-4o",
-    "prompt": "请简述什么是Transformer。",
-    "max_tokens": 64,
-    "temperature": 0.0,
-    "top_p": 1.0
+    "samples": [
+      {
+        "id": "chat_0",
+        "messages": [
+          {"role": "user", "content": "请简述 Transformer 的核心思想。"}
+        ]
+      }
+    ],
+    "methods": ["baseline", "streamingllm", "h2o"],
+    "method_configs": {
+      "streamingllm": {"sink_size": 4, "local_window_size": 256},
+      "h2o": {"sink_size": 4, "local_window_size": 256, "heavy_hitter_size": 128}
+    },
+    "max_new_tokens": 64
   }'
 ```
 
+## 三种 KV 策略的当前实现
 
-## tau2-bench 接入建议
+更完整的说明见 [docs/algorithms.md](docs/algorithms.md)。这里仅列当前代码里的关键事实：
 
-按方法分别评测时，将 base_url 指向不同端口：
+- `baseline`：手写逐步缓存解码，不做 cache 裁剪。
+- `streamingLLM`：prompt 在进入生成前会先裁成 `sink + recent`；生成时继续按位置滑窗裁剪，cache 预算是 `sink_size + local_window_size`。
+- `h2o`：当前主路径不会在 prefill 阶段读取 full-prompt attention。实现流程是：
+  1. 对完整 prompt 做普通 prefill
+  2. 用全零 `score_counters` 初始化当前活动 cache
+  3. 若 prompt 已超预算，首次裁剪会退化为“零分 + recent tie-break”，效果接近 `sink + recent`
+  4. 只有在 decode 过程中，且满足“本步需要裁剪”或“达到 `collect_period`”时，才会调用带 attention 的增量前向并累积分数
+  5. 分数只对当前活动 cache 生效；被驱逐 token 的历史分数不会保留
 
-- baseline: http://<host>:8000/v1
-- streamingLLM: http://<host>:8001/v1
-- h2o: http://<host>:8002/v1
-
-模型名可统一写 gpt-4o（通过 --served-model-name 控制）。
+如果旧文档还写着“h2o 用 full-prompt attention 完成首次 heavy-hitter 打分”，那已经不是当前实现。
 
 ## Python 侧调用
-
-统一接口在 src/api.py，建议按包路径导入：
 
 ```python
 from src.api import OracleKVProjectAPI
@@ -156,65 +214,36 @@ api = OracleKVProjectAPI(
     model_path="./local_models/Qwen3.5-9B",
     device="cuda",
     gpu_memory_utilization=0.9,
+    dtype="auto",
+    attn_implementation="sdpa",
 )
 ```
 
-## 目录说明
-
-- src/methods/baseline.py: baseline（full context）
-- src/methods/streaming_llm.py: streamingLLM
-- src/methods/h2o.py: h2o
-- api_server.py: HTTP 服务入口
-- offline_infer.py: 唯一离线推理入口（baseline / streamingLLM / h2o）
-
-## KV Cache 说明
-
-- baseline: 使用手写逐步缓存解码，KV cache 不裁剪。
-- streamingLLM: 使用手写逐步缓存解码；仅在进入生成前保留 Sink Tokens + Recent Tokens。
-- h2o: 以 streamingLLM 为基础，额外维护 Heavy Hitters。每个缓存 token 有一个 score 计数器，按每步解码时的注意力权重累计更新；当缓存超过预算时，仅在非 sink、非 recent 的普通 token 中淘汰累计得分最低者。
+统一入口在 `src/api.py`。核心公开方法是 `evaluate(...)`。
 
 ## 离线推理
 
-`offline_infer.py` 现在支持两种数据格式：
+`offline_infer.py` 支持两种输入格式：
 
-- `jsonl`：兼容原有 `prompt` / `messages` 输入
-- `tau2`：自动读取 `tasks.json`、`split_tasks.json`，并把任务转换为模型输入消息
+- `jsonl`：每行一个样本，支持 `prompt` 或 `messages`
+- `tau2`：从 tau2 domain 目录读取 `tasks.json`、`split_tasks.json` 和可选的 `policy.md`
 
-当 `--methods` 传入多个方法时，脚本会按顺序执行并且每个方法使用独立子进程：
-
-1. 先跑 `baseline`，进程结束
-2. 再跑 `streamingllm`，进程结束
-3. 再跑 `h2o`，进程结束
-
-最后父进程汇总 `all_results.jsonl` 和 `summary.jsonl`。
-
-默认数据集位置：
-
-- 你自己的数据建议放在 [data/raw](data/raw) 下，例如 [data/raw/offline_samples.jsonl](data/raw/offline_samples.jsonl)
-- 项目里提供了示例文件 [data/raw/offline_samples.example.jsonl](data/raw/offline_samples.example.jsonl)
-
-默认结果输出位置：
-
-- [outputs/offline_infer](outputs/offline_infer)
-- 其中会生成 baseline.jsonl、streamingllm.jsonl、h2o.jsonl、all_results.jsonl、summary.jsonl
-- 三种方法会分别独立运行后再汇总，便于逐方法对比
-
-数据格式：
+### JSONL 输入格式
 
 ```json
-{"id":"prompt_1","prompt":"请简述什么是Transformer。"}
+{"id":"prompt_1","prompt":"请简述什么是 Transformer。"}
 {"id":"chat_1","messages":[{"role":"system","content":"你是一个简洁的中文助手。"},{"role":"user","content":"你的模型是什么？"}]}
 ```
 
-启动方式：
+仓库当前不再维护根目录 `data/` 示例集。JSONL 输入文件请自行准备，然后把路径传给 `--input-jsonl`。
+
+### JSONL 示例
 
 ```bash
-cp data/raw/offline_samples.example.jsonl data/raw/offline_samples.jsonl
-
 python offline_infer.py \
   --dataset-format jsonl \
   --model-path ./local_models/Qwen3.5-9B \
-  --input-jsonl ./data/raw/offline_samples.jsonl \
+  --input-jsonl /path/to/offline_samples.jsonl \
   --output-dir ./outputs/offline_infer \
   --methods baseline streamingllm h2o \
   --device cuda \
@@ -223,12 +252,18 @@ python offline_infer.py \
   --h2o-heavy-hitter-size 128
 ```
 
-使用 tau2 airline 数据集评测（推荐）：
+### tau2 domain 示例
+
+仓库内可直接使用的 airline domain 在：
+
+- `./tau2-bench/data/tau2/domains/airline`
+
+示例命令：
 
 ```bash
 python offline_infer.py \
   --dataset-format tau2 \
-  --tau2-domain-dir ./data/tau2/domains/airline \
+  --tau2-domain-dir ./tau2-bench/data/tau2/domains/airline \
   --tau2-split test \
   --tau2-include-policy \
   --model-path ./local_models/Qwen3.5-9B \
@@ -240,65 +275,67 @@ python offline_infer.py \
   --h2o-heavy-hitter-size 128
 ```
 
-如果需要输出逐步缓存轨迹：
+### 离线推理的当前语义
 
-```bash
-python offline_infer.py \
-  --model-path ./local_models/Qwen3.5-9B \
-  --input-jsonl ./data/raw/offline_samples.jsonl \
-  --output-dir ./outputs/offline_infer \
-  --methods baseline streamingllm h2o \
-  --dataset-format jsonl \
-  --save-step-trace
-```
+- 当 `--methods` 传入多个方法时，脚本会按方法顺序拉起独立子进程，逐个完成推理，再汇总 `all_results.jsonl` 和 `summary.jsonl`。这样做主要是为了隔离显存状态，减少多方法混跑带来的碎片或 OOM。
+- `tau2` 模式会把每个 task 压成一条 `user` 消息；如果传了 `--tau2-include-policy`，会额外把 `policy.md` 放成一条 `system` 消息。
+- 因此 `offline_infer.py --dataset-format tau2` 适合做“单轮离线对比”，不等价于 tau2-bench 的真实多轮 agent 对话仿真。
+- `offline_infer.py` 的 `--attn-implementation auto` 在方法集合里包含 `h2o` 时会解析成 `eager`；如果你在长上下文上更关心 prefill 显存，可以显式传 `--attn-implementation sdpa` 再自行验证内存与结果。
 
-tau2 相关参数：
+### 输出文件
 
-- `--tau2-domain-dir`：如 `./data/tau2/domains/airline`
-- `--tau2-split`：`train` / `test` / `base` / `all`
-- `--tau2-include-policy`：把 `policy.md` 作为 system message 注入
-- `--tau2-limit`：只跑前 N 条任务，便于快速 smoke test
+无论 `jsonl` 还是 `tau2` 模式，`--output-dir` 下都会生成：
 
-## 离线功能 Smoke Test
+- `baseline.jsonl`
+- `streamingllm.jsonl`
+- `h2o.jsonl`
+- `all_results.jsonl`
+- `summary.jsonl`
 
-项目里新增了两套小测试集，专门用于验证离线推理流程是否正常：
+如果传入 `--save-step-trace`，每条结果还会带上 `step_trace` 字段，记录 `full_context_tokens`、`kept_tokens` 和 `kept_ratio`。
 
-- JSONL smoke：`data/raw/offline_smoke_samples.jsonl`
-- tau2 smoke：`data/tau2/domains/airline_smoke`
+## tau2-bench 全链路接入
 
-快速测试（JSONL）：
+按方法分别评测时，把 tau2 的 `agent-llm` 指向不同端口即可：
 
-```bash
-python offline_infer.py \
-  --dataset-format jsonl \
-  --input-jsonl ./data/raw/offline_smoke_samples.jsonl \
-  --output-dir ./outputs/offline_smoke_jsonl \
-  --methods baseline streamingllm h2o \
-  --device cuda \
-  --max-new-tokens 32 \
-  --h2o-heavy-hitter-size 64
-```
+- `baseline`：`http://<host>:8000/v1`
+- `streamingLLM`：`http://<host>:8001/v1`
+- `h2o`：`http://<host>:8002/v1`
 
-快速测试（tau2 smoke）：
+推荐先看这两个和当前 `api_server.py` CLI 对齐的脚本：
 
-```bash
-python offline_infer.py \
-  --dataset-format tau2 \
-  --tau2-domain-dir ./data/tau2/domains/airline_smoke \
-  --tau2-split base \
-  --tau2-include-policy \
-  --output-dir ./outputs/offline_smoke_tau2 \
-  --methods baseline streamingllm h2o \
-  --device cuda \
-  --max-new-tokens 32 \
-  --h2o-heavy-hitter-size 64
-```
+- `scripts/run/taubench/run_tau2_offline_sequential.sh`
+- `scripts/run/taubench/run_tau2_offline_parallel_multi_gpu.sh`
 
-可以修改的地方：
+补充说明：
 
-- 数据文件路径：启动命令里的 --input-jsonl
-- 输出目录：启动命令里的 --output-dir
-- 模型路径：启动命令里的 --model-path
-- 数据格式：--dataset-format jsonl/tau2
-- streamingLLM 参数：--streaming-sink-size、--streaming-local-window-size
-- h2o 参数：--h2o-sink-size、--h2o-local-window-size、--h2o-heavy-hitter-size
+- 这些脚本默认只把 `agent-llm` 指到本地 OpenAI-compatible server。
+- `USER_LLM` 默认仍是 `deepseek/deepseek-chat`，所以脚本默认不是“全链路离线”。
+- 如果你要做真正的本地闭环评测，还需要把 `user-llm` 一并改到本地 provider / api_base。
+- `scripts/run/taubench/` 下还有一批 sweep / stress 实验脚本，但其中一些带有实验性参数。实际可用参数以 `api_server.py` 当前 CLI 为准。
+
+## Attention 分析
+
+attention-by-role 分析脚本当前位于：
+
+- `scripts/analyze/taubench/analyze_attention_by_role.py`
+
+对应说明文档：
+
+- [docs/attention_analysis_guide.md](docs/attention_analysis_guide.md)
+
+默认输出目录是 `outputs/attention_task10`。脚本支持一次读取一个或多个 simulation JSON 文件。
+
+## 目录说明
+
+- `api_server.py`：HTTP 服务入口
+- `offline_infer.py`：离线批量推理入口
+- `src/api.py`：统一评测 API
+- `src/model.py`：模型加载、tokenization、cache 裁剪和 attention 聚合
+- `src/methods/baseline.py`：baseline policy
+- `src/methods/streaming_llm.py`：streamingLLM policy
+- `src/methods/h2o.py`：H2O policy
+- `scripts/run/bootstrap_all.sh`：推荐的一键环境初始化脚本
+- `scripts/run/taubench/`：tau2 自动化运行脚本
+- `scripts/analyze/taubench/`：tau2 结果分析脚本
+- `tau2-bench/`：tau2 上游代码和数据

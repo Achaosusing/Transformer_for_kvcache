@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 from typing import Any
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
+
+from .chat_format import format_canonical_chat
 
 
 @dataclass
@@ -92,25 +95,18 @@ class LocalTransformerModel:
         prompt: str | None,
         messages: list[dict[str, str]] | None,
         max_input_tokens: int | None,
+        *,
+        add_generation_prompt: bool = True,
+        tools: list[dict[str, Any]] | None = None,
+        canonical_chat: bool = False,
     ) -> list[int]:
         if messages:
-            try:
-                text = self.tokenizer.apply_chat_template(
-                    messages,
-                    tokenize=False,
-                    add_generation_prompt=True,
-                    enable_thinking=False,
-                )
-            except TypeError:
-                text = self.tokenizer.apply_chat_template(
-                    messages,
-                    tokenize=False,
-                    add_generation_prompt=True,
-                )
-            except Exception:
-                text = "\n".join(
-                    f"{m.get('role', 'user')}: {m.get('content', '')}" for m in messages
-                ) + "\nassistant:"
+            text = self.format_chat_messages(
+                messages,
+                add_generation_prompt=add_generation_prompt,
+                tools=tools,
+                canonical=canonical_chat,
+            )
             ids = self.tokenizer.encode(text, add_special_tokens=False)
         elif prompt is not None:
             ids = self.tokenizer.encode(prompt, add_special_tokens=False)
@@ -122,6 +118,42 @@ class LocalTransformerModel:
         if not ids:
             raise ValueError("Empty input after tokenization")
         return ids
+
+    def format_chat_messages(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        add_generation_prompt: bool,
+        tools: list[dict[str, Any]] | None = None,
+        canonical: bool = False,
+    ) -> str:
+        if canonical:
+            return format_canonical_chat(
+                messages,
+                tools=tools,
+                add_generation_prompt=add_generation_prompt,
+            )
+
+        template_kwargs: dict[str, Any] = {
+            "tokenize": False,
+            "add_generation_prompt": add_generation_prompt,
+        }
+        if tools is not None:
+            template_kwargs["tools"] = tools
+
+        try:
+            return self.tokenizer.apply_chat_template(
+                messages,
+                enable_thinking=False,
+                **template_kwargs,
+            )
+        except TypeError:
+            return self.tokenizer.apply_chat_template(messages, **template_kwargs)
+        except Exception:
+            prefix = "\nassistant:" if add_generation_prompt else ""
+            return "\n".join(
+                f"{m.get('role', 'user')}: {m.get('content', '')}" for m in messages
+            ) + prefix
 
     @torch.no_grad()
     def generate_new_tokens(
@@ -266,6 +298,32 @@ class LocalTransformerModel:
         if keep.numel() > 0:
             keep = keep[(keep >= 0) & (keep < cache_tensor.shape[seq_dim])]
         return cache_tensor.index_select(seq_dim, keep)
+
+    @classmethod
+    def _clone_cache_value(cls, value: Any, device: torch.device) -> Any:
+        if value is None:
+            return None
+        if torch.is_tensor(value):
+            return value.detach().to(device=device).clone()
+        if isinstance(value, list):
+            return [cls._clone_cache_value(item, device) for item in value]
+        if isinstance(value, tuple):
+            return tuple(cls._clone_cache_value(item, device) for item in value)
+        if isinstance(value, dict):
+            return {key: cls._clone_cache_value(item, device) for key, item in value.items()}
+
+        cloned = copy.deepcopy(value)
+        if hasattr(cloned, "__dict__"):
+            for attr_name, attr_value in vars(cloned).items():
+                setattr(cloned, attr_name, cls._clone_cache_value(attr_value, device))
+        return cloned
+
+    def clone_past_key_values(
+        self,
+        past_key_values: Any,
+        device: str | torch.device,
+    ) -> Any:
+        return self._clone_cache_value(past_key_values, torch.device(device))
 
     def prune_past_key_values(
         self,

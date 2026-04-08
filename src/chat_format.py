@@ -1,0 +1,301 @@
+from __future__ import annotations
+
+import json
+import re
+from typing import Any
+
+
+_TOOL_SYSTEM_PREFIX = (
+    "# Tools\n\n"
+    "You have access to the following functions:\n\n<tools>"
+)
+
+_TOOL_SYSTEM_SUFFIX = (
+    "\n\nIf you choose to call a function ONLY reply in the following format with NO suffix:\n\n"
+    "<tool_call>\n"
+    "<function=example_function_name>\n"
+    "<parameter=example_parameter_1>\n"
+    "value_1\n"
+    "</parameter>\n"
+    "<parameter=example_parameter_2>\n"
+    "This is the value for the second parameter\n"
+    "that can span\n"
+    "multiple lines\n"
+    "</parameter>\n"
+    "</function>\n"
+    "</tool_call>\n\n"
+    "<IMPORTANT>\n"
+    "Reminder:\n"
+    "- Function calls MUST follow the specified format: an inner <function=...></function> block must be nested within <tool_call></tool_call> XML tags\n"
+    "- Required parameters MUST be specified\n"
+    "- You may provide optional reasoning for your function call in natural language BEFORE the function call, but NOT after\n"
+    "- If there is no function call available, answer the question like normal with your current knowledge and do not tell the user about function calls\n"
+    "</IMPORTANT>"
+)
+
+_TOOL_CALL_BLOCK_RE = re.compile(
+    r"<tool_call>\s*<function=(?P<name>[^>\n]+)>\s*(?P<body>.*?)</function>\s*</tool_call>",
+    re.DOTALL,
+)
+
+_TOOL_PARAMETER_RE = re.compile(
+    r"<parameter=(?P<name>[^>\n]+)>\s*(?P<value>.*?)\s*</parameter>",
+    re.DOTALL,
+)
+
+
+def _json_roundtrip(value: Any) -> Any:
+    return json.loads(json.dumps(value, ensure_ascii=False, sort_keys=True))
+
+
+def normalize_tool_definitions(tools: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
+    if tools is None:
+        return None
+    return _json_roundtrip(tools)
+
+
+def _normalize_tool_arguments(arguments: Any) -> Any:
+    if isinstance(arguments, str):
+        stripped = arguments.strip()
+        if not stripped:
+            return {}
+        try:
+            return json.loads(stripped)
+        except json.JSONDecodeError:
+            return stripped
+    if arguments is None:
+        return {}
+    return _json_roundtrip(arguments)
+
+
+def normalize_tool_call(tool_call: dict[str, Any]) -> dict[str, Any]:
+    function = tool_call.get("function")
+    if isinstance(function, dict):
+        name = function.get("name", "")
+        arguments = function.get("arguments")
+    else:
+        name = tool_call.get("name", "")
+        arguments = tool_call.get("arguments")
+
+    return {
+        "id": tool_call.get("id"),
+        "type": str(tool_call.get("type", "function")),
+        "function": {
+            "name": str(name),
+            "arguments": _normalize_tool_arguments(arguments),
+        },
+    }
+
+
+def normalize_chat_message(message: dict[str, Any]) -> dict[str, Any]:
+    normalized: dict[str, Any] = {
+        "role": str(message.get("role", "user")),
+        "content": message.get("content"),
+    }
+    if message.get("tool_call_id") is not None:
+        normalized["tool_call_id"] = str(message["tool_call_id"])
+    if message.get("reasoning_content") is not None:
+        normalized["reasoning_content"] = str(message["reasoning_content"])
+    if message.get("tool_calls"):
+        normalized["tool_calls"] = [
+            normalize_tool_call(tool_call) for tool_call in message["tool_calls"]
+        ]
+    return normalized
+
+
+def normalize_chat_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [normalize_chat_message(message) for message in messages]
+
+
+def render_chat_content(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if content is None:
+        return ""
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if not isinstance(item, dict):
+                parts.append(str(item))
+                continue
+            item_type = item.get("type")
+            if "image" in item or "image_url" in item or item_type == "image":
+                parts.append("<|vision_start|><|image_pad|><|vision_end|>")
+            elif "video" in item or item_type == "video":
+                parts.append("<|vision_start|><|video_pad|><|vision_end|>")
+            elif "text" in item:
+                parts.append(str(item.get("text", "")))
+            else:
+                raise ValueError("Unexpected item type in content")
+        return "".join(parts)
+    raise ValueError("Unexpected content type")
+
+
+def _extract_reasoning_and_content(message: dict[str, Any]) -> tuple[str, str]:
+    reasoning_content = message.get("reasoning_content")
+    content = render_chat_content(message.get("content")).strip()
+    if isinstance(reasoning_content, str):
+        return reasoning_content.strip(), content
+    if "</think>" in content:
+        prefix, suffix = content.split("</think>", 1)
+        reasoning = prefix.split("<think>")[-1].strip()
+        return reasoning, suffix.lstrip("\n")
+    return "", content
+
+
+def _render_tool_call_blocks(
+    content: str,
+    tool_calls: list[dict[str, Any]] | None,
+) -> str:
+    if not tool_calls:
+        return content
+
+    parts: list[str] = [content]
+    for index, raw_tool_call in enumerate(tool_calls):
+        tool_call = normalize_tool_call(raw_tool_call)
+        function = tool_call["function"]
+        arguments = function["arguments"]
+
+        if index == 0:
+            parts.append("\n\n" if content else "")
+        else:
+            parts.append("\n")
+
+        parts.append(f"<tool_call>\n<function={function['name']}>\n")
+        if isinstance(arguments, dict):
+            iterator = arguments.items()
+        elif arguments in ({}, None):
+            iterator = ()
+        else:
+            iterator = (("input", arguments),)
+
+        for arg_name, arg_value in iterator:
+            parts.append(f"<parameter={arg_name}>\n")
+            if isinstance(arg_value, (dict, list)):
+                parts.append(json.dumps(arg_value, ensure_ascii=False))
+            else:
+                parts.append("" if arg_value is None else str(arg_value))
+            parts.append("\n</parameter>\n")
+        parts.append("</function>\n</tool_call>")
+
+    return "".join(parts)
+
+
+def format_canonical_chat(
+    messages: list[dict[str, Any]],
+    *,
+    tools: list[dict[str, Any]] | None = None,
+    add_generation_prompt: bool,
+) -> str:
+    normalized_messages = normalize_chat_messages(messages)
+    normalized_tools = normalize_tool_definitions(tools)
+    if not normalized_messages:
+        raise ValueError("No messages provided")
+
+    parts: list[str] = []
+    message_index = 0
+
+    if normalized_tools:
+        parts.append("<|im_start|>system\n")
+        parts.append(_TOOL_SYSTEM_PREFIX)
+        for tool in normalized_tools:
+            parts.append("\n")
+            parts.append(json.dumps(tool, ensure_ascii=False))
+        parts.append("\n</tools>")
+        parts.append(_TOOL_SYSTEM_SUFFIX)
+        if normalized_messages[0]["role"] == "system":
+            system_content = render_chat_content(normalized_messages[0].get("content")).strip()
+            if system_content:
+                parts.append("\n\n")
+                parts.append(system_content)
+            message_index = 1
+        parts.append("<|im_end|>\n")
+    elif normalized_messages[0]["role"] == "system":
+        system_content = render_chat_content(normalized_messages[0].get("content")).strip()
+        parts.append("<|im_start|>system\n")
+        parts.append(system_content)
+        parts.append("<|im_end|>\n")
+        message_index = 1
+
+    while message_index < len(normalized_messages):
+        message = normalized_messages[message_index]
+        role = message["role"]
+        if role == "system":
+            if message_index != 0:
+                raise ValueError("System message must be at the beginning")
+            message_index += 1
+            continue
+        if role == "user":
+            content = render_chat_content(message.get("content")).strip()
+            parts.append(f"<|im_start|>user\n{content}<|im_end|>\n")
+            message_index += 1
+            continue
+        if role == "assistant":
+            reasoning, content = _extract_reasoning_and_content(message)
+            body = _render_tool_call_blocks(content, message.get("tool_calls"))
+            parts.append("<|im_start|>assistant\n")
+            parts.append(f"<think>\n{reasoning}\n</think>\n\n")
+            parts.append(body)
+            parts.append("<|im_end|>\n")
+            message_index += 1
+            continue
+        if role == "tool":
+            parts.append("<|im_start|>user")
+            while message_index < len(normalized_messages) and normalized_messages[message_index]["role"] == "tool":
+                tool_content = render_chat_content(normalized_messages[message_index].get("content")).strip()
+                parts.append("\n<tool_response>\n")
+                parts.append(tool_content)
+                parts.append("\n</tool_response>")
+                message_index += 1
+            parts.append("<|im_end|>\n")
+            continue
+        raise ValueError(f"Unexpected message role: {role}")
+
+    if add_generation_prompt:
+        parts.append("<|im_start|>assistant\n<think>\n\n</think>\n\n")
+
+    return "".join(parts)
+
+
+def _parse_tool_argument(raw_value: str) -> Any:
+    value = raw_value.strip()
+    if not value:
+        return ""
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return value
+
+
+def extract_tool_calls_from_text(text: str) -> tuple[str | None, list[dict[str, Any]] | None]:
+    if not text:
+        return None, None
+
+    matches = list(_TOOL_CALL_BLOCK_RE.finditer(text))
+    if not matches:
+        stripped = text.strip()
+        return stripped or None, None
+
+    content_parts: list[str] = []
+    tool_calls: list[dict[str, Any]] = []
+    last_end = 0
+    for match in matches:
+        content_parts.append(text[last_end:match.start()])
+        function_name = match.group("name").strip()
+        arguments: dict[str, Any] = {}
+        for parameter_match in _TOOL_PARAMETER_RE.finditer(match.group("body")):
+            param_name = parameter_match.group("name").strip()
+            arguments[param_name] = _parse_tool_argument(parameter_match.group("value"))
+        tool_calls.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": function_name,
+                    "arguments": arguments,
+                },
+            }
+        )
+        last_end = match.end()
+    content_parts.append(text[last_end:])
+    content = "".join(content_parts).strip() or None
+    return content, tool_calls or None

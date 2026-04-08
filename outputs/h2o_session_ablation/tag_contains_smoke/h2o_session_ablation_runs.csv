@@ -1,0 +1,3 @@
+variant,num_trials,num_tasks,sink,window,heavy,tag,source_file,n,success_rate,avg_duration,timeout_rate,avg_turns
+session_decay,1,30,4,256,64,0p8b_gpu567_20260407_190424,h2o_session_ablation_session_decay_1x30_s4_w256_h64_0p8b_gpu567_20260407_190424.json,30,0.3,319.5879673763023,0.06666666666666667,29.233333333333334
+stateless,1,30,4,256,64,0p8b_gpu567_20260407_190424,h2o_session_ablation_stateless_1x30_s4_w256_h64_0p8b_gpu567_20260407_190424.json,30,0.3,199.64947075992822,0.0,32.53333333333333

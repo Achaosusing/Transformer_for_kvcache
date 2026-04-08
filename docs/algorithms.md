@@ -173,6 +173,128 @@ $$
 2. 先在 head 维求平均
 3. 再在有效 layer 维求平均
 
+### 4.2.1 当前实现里的分数不是原始 qk，相当于什么
+
+这里的 $s_{t,i}$ 不是 softmax 之前的原始 qk 相似度，也不是某个单层单头的分数。
+
+当前实现真正累加的是：
+
+1. 当前 decode 收集步里，最后一个 query token 对“当前活动 cache”全部 key token 的后 softmax 注意力概率。
+2. 对所有有效 attention head 做平均。
+3. 对所有有效 full-attention layer 做平均。
+4. 把得到的长度为 `active_token_count` 的向量加到 `score_counters` 上。
+
+写成公式，可记为：
+
+$$
+s_t(i) = \frac{1}{|L_t|} \sum_{l \in L_t} \frac{1}{H_l} \sum_{h=1}^{H_l}
+\operatorname{softmax}\left(\frac{q_{l,h,t} K_{l,h,1:n}^{\top}}{\sqrt{d}} + m\right)_i
+$$
+
+其中：
+
+1. $t$ 是当前 decode 收集步。
+2. $i$ 是当前活动 cache 中的第 $i$ 个 token。
+3. $L_t$ 是这一时刻真正返回 dense attention 的 layer 集合。
+4. $H_l$ 是该 layer 的 query head 数。
+5. $m$ 是 causal mask 与可能的 padding mask。
+
+然后分数更新为：
+
+$$
+S_i \leftarrow S_i + s_t(i)
+$$
+
+因此当前 H2O 分数有四个重要性质：
+
+1. 它是后 softmax 概率，不是 pre-softmax logits。
+2. 它是最后一个 query 的回看分布，不是整段 prompt 的全局 attention 汇总。
+3. 它是跨头平均、跨层平均后的结果，不保留单头差异。
+4. 它是多次收集步上的累计量，不是单步静态打分。
+
+### 4.2.2 在 Qwen3.5-9B 上具体来自哪些层、哪些头、哪些向量
+
+当前默认模型 `local_models/Qwen3.5-9B` 是 hybrid 结构，不是 32 层都做 full attention。
+
+根据模型配置：
+
+1. 总层数是 32。
+2. `layer_types` 里每 4 层出现一次 `full_attention`。
+3. 因此当前 dense attention 分数只来自第 4、8、12、16、20、24、28、32 层。
+4. `num_attention_heads = 16`。
+5. `num_key_value_heads = 4`。
+6. `head_dim = 256`。
+
+这意味着当前分数不是“32 层全参与”的平均，而只是来自 8 个 full-attention 层的平均。
+
+在每个 full-attention 层里，Qwen3.5 的向量来源是：
+
+1. 当前层输入 `hidden_states` 先过 `input_layernorm`。
+2. 用 `q_proj` 生成 query，再做 `q_norm`。
+3. 用 `k_proj` 生成 key，再做 `k_norm`。
+4. query 和 key 再一起应用 RoPE。
+5. 如果存在 `past_key_values`，则把当前步的 key/value 追加到 cache 中。
+6. 然后在 attention 内部计算最后一个 query 对全部 cache key 的注意力。
+
+也就是说，当前分数依赖的是：
+
+1. RoPE 之后的 query。
+2. RoPE 之后、并且已经合入 cache 的 key。
+3. 不直接依赖 value 向量本身。
+
+需要特别注意 GQA：
+
+1. Qwen3.5-9B 只有 4 个 KV heads，但有 16 个 query heads。
+2. eager attention 内部会先把 KV heads repeat 到 query head 数。
+3. 所以当前分数最终仍然是“16 个 query heads 的注意力分布平均”，只是这些 head 共享 4 组底层 KV 头。
+
+### 4.2.3 当前代码到底取了哪一行 attention
+
+`LocalTransformerModel._aggregate_last_query_attention(...)` 当前取的是：
+
+1. batch 维固定取第 0 个样本。
+2. head 维取所有 heads。
+3. query 维固定取最后一个 query，也就是 `-1`。
+4. key 维取当前活动 cache 中全部 key positions。
+
+等价于对每层 attention 张量取：
+
+$$
+v_l = \text{mean}_{h}\left(A_l[0, h, -1, :]\right)
+$$
+
+然后再对 layer 做平均。
+
+所以当前 H2O 分数并不是：
+
+1. 所有 query 行的平均。
+2. 整个 attention matrix 的总和。
+3. 某个单头最强值。
+4. 原始 qk logits。
+
+### 4.2.4 这和几种近似分数的关系
+
+如果后续改成更轻量的实现，可以把差异理解为下面几类。
+
+第一类：在 attention 模块里直接导出最后一个 query 的压缩向量。
+
+1. 如果导出的就是“当前层最后一个 query 的后 softmax 向量”，再按现在同样方式跨头、跨层聚合，那么语义上可以和当前实现等价。
+2. 如果只导出 top-k、block sum 或别的压缩统计，就会从精确实现退化成近似实现。
+
+第二类：自己拿 last-query 的 q 和历史 k 做轻量 qk 打分。
+
+1. 如果拿到的是 attention 模块内部完全同一份 q、k，并且同样做 mask、缩放、softmax 和 GQA 头映射，那么也可以做到和当前实现等价。
+2. 如果只算原始 qk 而不做 softmax，那么得到的是未归一化相似度，和当前“概率质量”分数不再同义。
+3. 如果只取单层、单头，或提前做头合并，也会偏离当前实现。
+
+第三类：自定义 kernel 或 patched attention，只返回 top-k、sum、running stats。
+
+1. 如果 kernel 内部先算出与当前实现一致的最后一行 attention 分布，再直接返回聚合结果，本质上还是精确实现，只是 reduction 更早发生。
+2. 如果只返回 top-k，通常会高估尖峰 token，低估那些长期稳定拿到中等注意力的 token。
+3. 如果只返回块级统计，则会丢掉 token 级排序信息。
+
+因此，和当前实现最接近的优化方向，不是“换一种新的分数定义”，而是“保留现有分数定义，把完整 attentions 的返回改成只返回最后一行或更早聚合后的结果”。
+
 ### 4.3 当前主执行路径
 
 当前 `OracleKVProjectAPI._generate_with_h2o(...)` 的真实执行步骤是：

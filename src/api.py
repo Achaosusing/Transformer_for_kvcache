@@ -22,6 +22,14 @@ class EvalResult:
     elapsed_sec: float
 
 
+@dataclass
+class H2ORuntimeState:
+    past_key_values: Any
+    score_counters: torch.Tensor
+    active_token_count: int
+    steps_since_collect: int = 0
+
+
 class OracleKVProjectAPI:
     """Unified API for separated baseline/streamingLLM/h2o evaluation."""
 
@@ -70,6 +78,201 @@ class OracleKVProjectAPI:
         if attention_scores.shape[0] != score_counters.shape[0]:
             raise RuntimeError("Attention score length does not match H2O cache length")
         score_counters.add_(attention_scores.to(device=score_counters.device, dtype=score_counters.dtype))
+
+    def initialize_h2o_state(
+        self,
+        token_ids: list[int],
+        policy: Any,
+    ) -> tuple[torch.Tensor, H2ORuntimeState]:
+        # Standard H2O prefill avoids materializing full prompt attention.
+        cached_logits, past_key_values = self.model.prefill_next_token_logits(token_ids)
+
+        device = self.model.model.device
+        active_token_count = len(token_ids)
+        score_counters = torch.zeros(active_token_count, dtype=torch.float32, device=device)
+
+        # Initial pruning falls back to recency tie-break because scores start at zero.
+        if active_token_count > policy.cache_budget:
+            keep_tensor = policy.select_keep_tensor(active_token_count, score_counters)
+            score_counters = score_counters[keep_tensor]
+            past_key_values = self.model.prune_past_key_values(past_key_values, keep_tensor)
+            active_token_count = keep_tensor.numel()
+
+        return cached_logits, H2ORuntimeState(
+            past_key_values=past_key_values,
+            score_counters=score_counters,
+            active_token_count=active_token_count,
+        )
+
+    def continue_h2o_state(
+        self,
+        token_ids: list[int],
+        policy: Any,
+        state: H2ORuntimeState,
+        evict_period: int = 1,
+        collect_period: int = 1,
+    ) -> tuple[torch.Tensor | None, H2ORuntimeState]:
+        cached_logits: torch.Tensor | None = None
+        for token_id in token_ids:
+            cached_logits, state = self._advance_h2o_state_with_token(
+                token_id=token_id,
+                policy=policy,
+                state=state,
+                evict_period=evict_period,
+                collect_period=collect_period,
+            )
+        return cached_logits, state
+
+    def generate_from_h2o_state(
+        self,
+        cached_logits: torch.Tensor,
+        state: H2ORuntimeState,
+        policy: Any,
+        max_new_tokens: int,
+        temperature: float,
+        top_p: float,
+        stop_on_eos: bool,
+        save_step_trace: bool,
+        prompt_len: int,
+        evict_period: int = 1,
+        collect_period: int = 1,
+    ) -> tuple[list[int], list[StepTrace], torch.Tensor, H2ORuntimeState]:
+        generated_ids: list[int] = []
+        traces: list[StepTrace] = []
+        eos_token_id = self.model.tokenizer.eos_token_id
+
+        for step in range(max_new_tokens):
+            if save_step_trace:
+                traces.append(
+                    StepTrace(
+                        step=step,
+                        full_context_tokens=prompt_len + len(generated_ids),
+                        kept_tokens=state.active_token_count,
+                        kept_ratio=state.active_token_count / max(prompt_len + len(generated_ids), 1),
+                    )
+                )
+
+            next_id = self.model.sample_next_token(cached_logits, temperature, top_p)
+            generated_ids.append(next_id)
+
+            if stop_on_eos and eos_token_id is not None and next_id == eos_token_id:
+                break
+
+            cached_logits, state = self._advance_h2o_state_with_token(
+                token_id=next_id,
+                policy=policy,
+                state=state,
+                evict_period=evict_period,
+                collect_period=collect_period,
+            )
+
+        return generated_ids, traces, cached_logits, state
+
+    def clone_h2o_state(
+        self,
+        state: H2ORuntimeState,
+        device: str | torch.device,
+    ) -> H2ORuntimeState:
+        return H2ORuntimeState(
+            past_key_values=self.model.clone_past_key_values(state.past_key_values, device),
+            score_counters=state.score_counters.detach().to(device=device).clone(),
+            active_token_count=state.active_token_count,
+            steps_since_collect=state.steps_since_collect,
+        )
+
+    @staticmethod
+    def apply_max_normalized_h2o_decay(
+        score_counters: torch.Tensor,
+        alpha: float,
+    ) -> torch.Tensor:
+        if not (0.0 <= alpha):
+            raise ValueError("alpha must be >= 0")
+        if score_counters.numel() == 0:
+            return score_counters.clone()
+
+        max_score = torch.max(score_counters)
+        if max_score.item() <= 0:
+            normalized = torch.zeros_like(score_counters)
+        else:
+            normalized = score_counters / max_score
+        return normalized * alpha
+
+    def restore_h2o_state(
+        self,
+        state: H2ORuntimeState,
+        *,
+        alpha: float,
+    ) -> H2ORuntimeState:
+        restored = self.clone_h2o_state(state, self.model.model.device)
+        restored.score_counters = self.apply_max_normalized_h2o_decay(
+            restored.score_counters,
+            alpha,
+        )
+        restored.steps_since_collect = 0
+        return restored
+
+    def trim_h2o_state_tail(
+        self,
+        state: H2ORuntimeState,
+        trim_tokens: int,
+    ) -> H2ORuntimeState:
+        if trim_tokens <= 0:
+            return state
+        if trim_tokens >= state.active_token_count:
+            raise ValueError("trim_tokens must be smaller than active_token_count")
+
+        keep_count = state.active_token_count - trim_tokens
+        keep_tensor = torch.arange(
+            keep_count,
+            device=self.model.model.device,
+            dtype=torch.long,
+        )
+        state.score_counters = state.score_counters[:keep_count]
+        state.past_key_values = self.model.prune_past_key_values(state.past_key_values, keep_tensor)
+        state.active_token_count = keep_count
+        state.steps_since_collect = 0
+        return state
+
+    def _advance_h2o_state_with_token(
+        self,
+        token_id: int,
+        policy: Any,
+        state: H2ORuntimeState,
+        evict_period: int = 1,
+        collect_period: int = 1,
+    ) -> tuple[torch.Tensor, H2ORuntimeState]:
+        zero = torch.zeros(1, dtype=state.score_counters.dtype, device=state.score_counters.device)
+
+        next_total_tokens = state.active_token_count + 1
+        need_evict = next_total_tokens > policy.cache_budget + evict_period - 1
+        if need_evict:
+            extended_scores = torch.cat([state.score_counters, zero])
+            keep_tensor = policy.select_keep_tensor(next_total_tokens, extended_scores)
+            keep_tensor = keep_tensor[keep_tensor < state.active_token_count]
+            state.score_counters = state.score_counters[keep_tensor]
+            state.past_key_values = self.model.prune_past_key_values(state.past_key_values, keep_tensor)
+            state.active_token_count = keep_tensor.numel()
+
+        state.score_counters = torch.cat([state.score_counters, zero])
+        state.active_token_count += 1
+        state.steps_since_collect += 1
+
+        need_collect = need_evict or state.steps_since_collect >= collect_period
+        if need_collect:
+            cached_logits, state.past_key_values, attention_scores = self.model.next_token_logits_from_cache_with_attention(
+                token_id,
+                state.past_key_values,
+                expected_tokens=state.active_token_count,
+            )
+            self._accumulate_h2o_scores(state.score_counters, attention_scores)
+            state.steps_since_collect = 0
+        else:
+            cached_logits, state.past_key_values = self.model.next_token_logits_from_cache(
+                token_id,
+                state.past_key_values,
+            )
+
+        return cached_logits, state
 
     def _generate_with_manual_cache(
         self,
@@ -191,80 +394,20 @@ class OracleKVProjectAPI:
         evict_period: int = 1,
         collect_period: int = 1,
     ) -> tuple[list[int], list[StepTrace]]:
-        # Standard H2O: prefill WITHOUT attention output (avoids O(N²) memory
-        # spike from materializing full attention matrices).  Heavy-hitter
-        # scores are accumulated incrementally during decode steps only.
-        cached_logits, past_key_values = self.model.prefill_next_token_logits(token_ids)
-
-        device = self.model.model.device
-        active_token_count = len(token_ids)
-        score_counters = torch.zeros(active_token_count, dtype=torch.float32, device=device)
-        _zero = torch.zeros(1, dtype=score_counters.dtype, device=device)
-
-        # Initial pruning: scores are zero so heavy-hitter selection falls
-        # back to recency tiebreaker (effectively sink + window).  Real
-        # heavy-hitter selection kicks in once decode-time attention
-        # scores have been accumulated.
-        if active_token_count > policy.cache_budget:
-            keep_tensor = policy.select_keep_tensor(active_token_count, score_counters)
-            score_counters = score_counters[keep_tensor]
-            past_key_values = self.model.prune_past_key_values(past_key_values, keep_tensor)
-            active_token_count = keep_tensor.numel()
-
-        generated_ids: list[int] = []
-        traces: list[StepTrace] = []
-        eos_token_id = self.model.tokenizer.eos_token_id
-        steps_since_collect = 0
-
-        for step in range(max_new_tokens):
-            if save_step_trace:
-                traces.append(
-                    StepTrace(
-                        step=step,
-                        full_context_tokens=prompt_len + len(generated_ids),
-                        kept_tokens=active_token_count,
-                        kept_ratio=active_token_count / max(prompt_len + len(generated_ids), 1),
-                    )
-                )
-
-            next_id = self.model.sample_next_token(cached_logits, temperature, top_p)
-            generated_ids.append(next_id)
-
-            if stop_on_eos and eos_token_id is not None and next_id == eos_token_id:
-                break
-
-            next_total_tokens = active_token_count + 1
-            need_evict = next_total_tokens > policy.cache_budget + evict_period - 1
-            if need_evict:
-                extended_scores = torch.cat([score_counters, _zero])
-                keep_tensor = policy.select_keep_tensor(next_total_tokens, extended_scores)
-                # Filter out the not-yet-inserted new-token index.
-                keep_tensor = keep_tensor[keep_tensor < active_token_count]
-                score_counters = score_counters[keep_tensor]
-                past_key_values = self.model.prune_past_key_values(past_key_values, keep_tensor)
-                active_token_count = keep_tensor.numel()
-
-            score_counters = torch.cat([score_counters, _zero])
-            active_token_count += 1
-            steps_since_collect += 1
-
-            # Collect attention when: (a) evicting this step, or
-            # (b) collect_period steps have elapsed since last collection.
-            need_collect = need_evict or steps_since_collect >= collect_period
-            if need_collect:
-                cached_logits, past_key_values, attention_scores = self.model.next_token_logits_from_cache_with_attention(
-                    next_id,
-                    past_key_values,
-                    expected_tokens=active_token_count,
-                )
-                self._accumulate_h2o_scores(score_counters, attention_scores)
-                steps_since_collect = 0
-            else:
-                cached_logits, past_key_values = self.model.next_token_logits_from_cache(
-                    next_id,
-                    past_key_values,
-                )
-
+        cached_logits, state = self.initialize_h2o_state(token_ids, policy)
+        generated_ids, traces, _, _ = self.generate_from_h2o_state(
+            cached_logits=cached_logits,
+            state=state,
+            policy=policy,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            stop_on_eos=stop_on_eos,
+            save_step_trace=save_step_trace,
+            prompt_len=prompt_len,
+            evict_period=evict_period,
+            collect_period=collect_period,
+        )
         return generated_ids, traces
 
     def evaluate(
