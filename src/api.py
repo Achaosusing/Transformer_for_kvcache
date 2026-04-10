@@ -6,6 +6,7 @@ from typing import Any
 
 import torch
 
+from .chat_format import ROLE_GENERATED
 from .methods import METHODS, prune_streaming_prompt
 from .model import LocalTransformerModel, StepTrace
 from .utils import normalize_sample
@@ -28,6 +29,7 @@ class H2ORuntimeState:
     score_counters: torch.Tensor
     active_token_count: int
     steps_since_collect: int = 0
+    role_tags: torch.Tensor | None = None  # per-position role id (ROLE_*)
 
 
 class OracleKVProjectAPI:
@@ -83,25 +85,59 @@ class OracleKVProjectAPI:
         self,
         token_ids: list[int],
         policy: Any,
+        role_ids: list[int] | None = None,
     ) -> tuple[torch.Tensor, H2ORuntimeState]:
-        # Standard H2O prefill avoids materializing full prompt attention.
-        cached_logits, past_key_values = self.model.prefill_next_token_logits(token_ids)
-
         device = self.model.model.device
         active_token_count = len(token_ids)
-        score_counters = torch.zeros(active_token_count, dtype=torch.float32, device=device)
 
-        # Initial pruning falls back to recency tie-break because scores start at zero.
+        # --- Scheme D: collect prefill attention scores via SDPA capture ---
+        # Instead of leaving scores at zero and relying on recency tie-break
+        # for the initial eviction, we extract the last-query attention from
+        # the prefill forward pass so that the first prune is informed.
+        from .model import SDPAAttentionCapture
+
+        if self.model.attn_implementation == "sdpa":
+            with torch.no_grad(), SDPAAttentionCapture(active_token_count, device) as cap:
+                input_ids_t = torch.tensor([token_ids], dtype=torch.long, device=device)
+                out = self.model.model(
+                    input_ids=input_ids_t,
+                    use_cache=True,
+                )
+            cached_logits = out.logits[0, -1, :].float()
+            past_key_values = out.past_key_values
+            score_counters = cap.get_scores()
+        else:
+            # Eager fallback: use output_attentions for the prefill.
+            cached_logits, past_key_values, score_counters = (
+                self.model.prefill_next_token_logits_with_attention(token_ids)
+            )
+
+        # Build role_tags tensor.
+        if role_ids is not None:
+            role_tags = torch.tensor(role_ids[:active_token_count], dtype=torch.int8, device=device)
+            if role_tags.numel() < active_token_count:
+                pad = torch.full(
+                    (active_token_count - role_tags.numel(),),
+                    ROLE_GENERATED, dtype=torch.int8, device=device,
+                )
+                role_tags = torch.cat([role_tags, pad])
+        else:
+            role_tags = None
+
+        # Initial pruning – now informed by prefill attention scores.
         if active_token_count > policy.cache_budget:
             keep_tensor = policy.select_keep_tensor(active_token_count, score_counters)
             score_counters = score_counters[keep_tensor]
             past_key_values = self.model.prune_past_key_values(past_key_values, keep_tensor)
+            if role_tags is not None:
+                role_tags = role_tags[keep_tensor]
             active_token_count = keep_tensor.numel()
 
         return cached_logits, H2ORuntimeState(
             past_key_values=past_key_values,
             score_counters=score_counters,
             active_token_count=active_token_count,
+            role_tags=role_tags,
         )
 
     def continue_h2o_state(
@@ -178,6 +214,7 @@ class OracleKVProjectAPI:
             score_counters=state.score_counters.detach().to(device=device).clone(),
             active_token_count=state.active_token_count,
             steps_since_collect=state.steps_since_collect,
+            role_tags=state.role_tags.detach().to(device=device).clone() if state.role_tags is not None else None,
         )
 
     @staticmethod
@@ -197,17 +234,72 @@ class OracleKVProjectAPI:
             normalized = score_counters / max_score
         return normalized * alpha
 
+    @staticmethod
+    def apply_role_aware_h2o_decay(
+        score_counters: torch.Tensor,
+        role_tags: torch.Tensor,
+        role_alphas: dict[int, float],
+        default_alpha: float = 0.5,
+    ) -> torch.Tensor:
+        """Per-role exponential decay: each role type can have its own alpha.
+
+        Higher alpha means the role's tokens retain more importance across
+        turns.  Recommended defaults:
+            ROLE_SYSTEM=0.9, ROLE_TOOL=0.7, ROLE_USER=0.3, ROLE_ASSISTANT=0.3
+        """
+        if score_counters.numel() == 0:
+            return score_counters.clone()
+
+        decayed = score_counters.clone()
+        for role_id, alpha in role_alphas.items():
+            mask = role_tags == role_id
+            if not mask.any():
+                continue
+            segment = decayed[mask]
+            max_s = segment.max()
+            if max_s.item() <= 0:
+                decayed[mask] = 0.0
+            else:
+                decayed[mask] = (segment / max_s) * alpha
+
+        # Tokens with roles not in role_alphas get default_alpha.
+        covered = torch.zeros_like(role_tags, dtype=torch.bool)
+        for role_id in role_alphas:
+            covered |= (role_tags == role_id)
+        if not covered.all():
+            uncovered = ~covered
+            segment = decayed[uncovered]
+            max_s = segment.max()
+            if max_s.item() > 0:
+                decayed[uncovered] = (segment / max_s) * default_alpha
+            else:
+                decayed[uncovered] = 0.0
+
+        return decayed
+
     def restore_h2o_state(
         self,
         state: H2ORuntimeState,
         *,
         alpha: float,
+        role_alphas: dict[int, float] | None = None,
     ) -> H2ORuntimeState:
         restored = self.clone_h2o_state(state, self.model.model.device)
-        restored.score_counters = self.apply_max_normalized_h2o_decay(
-            restored.score_counters,
-            alpha,
-        )
+
+        # --- Scheme C: role-aware decay when role_tags are available ---
+        if restored.role_tags is not None and role_alphas is not None:
+            restored.score_counters = self.apply_role_aware_h2o_decay(
+                restored.score_counters,
+                restored.role_tags,
+                role_alphas,
+                default_alpha=alpha,
+            )
+        else:
+            # Fallback to the original uniform decay.
+            restored.score_counters = self.apply_max_normalized_h2o_decay(
+                restored.score_counters,
+                alpha,
+            )
         restored.steps_since_collect = 0
         return restored
 
@@ -228,6 +320,8 @@ class OracleKVProjectAPI:
             dtype=torch.long,
         )
         state.score_counters = state.score_counters[:keep_count]
+        if state.role_tags is not None:
+            state.role_tags = state.role_tags[:keep_count]
         state.past_key_values = self.model.prune_past_key_values(state.past_key_values, keep_tensor)
         state.active_token_count = keep_count
         state.steps_since_collect = 0
@@ -250,10 +344,15 @@ class OracleKVProjectAPI:
             keep_tensor = policy.select_keep_tensor(next_total_tokens, extended_scores)
             keep_tensor = keep_tensor[keep_tensor < state.active_token_count]
             state.score_counters = state.score_counters[keep_tensor]
+            if state.role_tags is not None:
+                state.role_tags = state.role_tags[keep_tensor]
             state.past_key_values = self.model.prune_past_key_values(state.past_key_values, keep_tensor)
             state.active_token_count = keep_tensor.numel()
 
         state.score_counters = torch.cat([state.score_counters, zero])
+        if state.role_tags is not None:
+            new_tag = torch.tensor([ROLE_GENERATED], dtype=state.role_tags.dtype, device=state.role_tags.device)
+            state.role_tags = torch.cat([state.role_tags, new_tag])
         state.active_token_count += 1
         state.steps_since_collect += 1
 

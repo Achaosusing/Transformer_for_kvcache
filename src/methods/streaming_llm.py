@@ -27,5 +27,4 @@ class StreamingLLMPolicy:
         tail_start = max(sink_end, total_tokens - self.local_window_size)
         keep = set(range(sink_end))
         keep.update(range(tail_start, total_tokens))
-        keep.add(total_tokens - 1)
         return sorted(keep)

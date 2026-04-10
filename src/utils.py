@@ -47,18 +47,23 @@ def write_jsonl(path: str | Path, rows: list[dict[str, Any]]) -> None:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
-def normalize_sample(item: dict[str, Any]) -> tuple[str, str | None, list[dict[str, str]] | None]:
+def normalize_sample(item: dict[str, Any]) -> tuple[str, str | None, list[dict[str, Any]] | None]:
     sample_id = str(item.get("id", "sample"))
     messages = item.get("messages")
     if isinstance(messages, list) and messages:
-        norm: list[dict[str, str]] = []
+        norm: list[dict[str, Any]] = []
         for m in messages:
-            norm.append(
-                {
-                    "role": str(m.get("role", "user")),
-                    "content": str(m.get("content", "")),
-                }
-            )
+            entry: dict[str, Any] = {
+                "role": str(m.get("role", "user")),
+                "content": str(m.get("content", "")),
+            }
+            if m.get("tool_calls"):
+                entry["tool_calls"] = m["tool_calls"]
+            if m.get("tool_call_id") is not None:
+                entry["tool_call_id"] = str(m["tool_call_id"])
+            if m.get("reasoning_content") is not None:
+                entry["reasoning_content"] = str(m["reasoning_content"])
+            norm.append(entry)
         return sample_id, None, norm
 
     for key in ("prompt", "instruction", "question", "input"):

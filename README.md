@@ -9,7 +9,6 @@
 当前主入口：
 
 - `api_server.py`：OpenAI 风格 HTTP 服务
-- `offline_infer.py`：离线批量推理入口
 - `src/api.py`：统一 Python 调用接口
 - [docs/algorithms.md](docs/algorithms.md)：算法与实现细节
 - [docs/attention_analysis_guide.md](docs/attention_analysis_guide.md)：attention-by-role 分析说明
@@ -110,8 +109,9 @@ python api_server.py \
   - `/v1/evaluate` 默认同时运行 `baseline`、`streamingllm`、`h2o`
   - `/v1/chat/completions` 和 `/v1/completions` 默认只运行 `baseline`
 - `/v1/chat/completions` 和 `/v1/completions` 也可以通过请求体里的 `methods` 指定多方法，此时响应里的 `choices` 会额外带上 `method` 字段。
-- `h2o` 的 `/v1/chat/completions` 现在支持可选 `session_id`。当后续请求满足“上一轮完整历史 + 严格尾部追加”时，服务端会尝试复用上一轮的 H2O 活动 KV snapshot，而不是重新 prefill 全部历史。
-- 上面的会话复用路径只在“单方法 `h2o` chat 请求”里生效；当前不支持和 `max_input_tokens` 组合使用。
+- `h2o` 的 `/v1/chat/completions` 支持**自动多轮 session 复用**：服务端会自动通过 token 前缀匹配找到上一轮的 KV cache 快照并增量续写，无需 client 传递任何额外字段。这对所有标准 OpenAI 兼容 client 透明生效（MT-Bench、LangChain、OpenAI SDK 等）。
+- 也支持可选的 `session_id` 字段作为精确查找的快捷路径（向后兼容）。
+- session 复用路径只在"单方法 `h2o` chat 请求"里生效；当前不支持和 `max_input_tokens` 组合使用。
 - `h2o` 的 chat 路径支持 OpenAI 风格的 `tools`、`tool_choice`（当前不支持显式对象形式的 `tool_choice`），响应里会在适用时返回 `tool_calls`。
 
 ### curl 示例
@@ -136,7 +136,34 @@ curl -sS -X POST "http://127.0.0.1:8000/v1/chat/completions" \
     "top_p": 1.0
   }'
 
-# h2o + session_id + tools
+# h2o 多轮自动 session 复用（无需 session_id）
+# 第 1 轮
+curl -sS -X POST "http://127.0.0.1:8002/v1/chat/completions" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4o",
+    "methods": ["h2o"],
+    "messages": [
+      {"role": "user", "content": "帮我查询订单 123 的状态"}
+    ],
+    "temperature": 0.0
+  }'
+# 第 2 轮：追加 assistant 回复 + 新 user 消息
+# 服务端会自动通过 token 前缀匹配找到第 1 轮的 KV cache 快照并增量续写
+curl -sS -X POST "http://127.0.0.1:8002/v1/chat/completions" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4o",
+    "methods": ["h2o"],
+    "messages": [
+      {"role": "user", "content": "帮我查询订单 123 的状态"},
+      {"role": "assistant", "content": "（第 1 轮的实际输出）"},
+      {"role": "user", "content": "那 456 呢？"}
+    ],
+    "temperature": 0.0
+  }'
+
+# h2o + 显式 session_id + tools（向后兼容路径）
 curl -sS -X POST "http://127.0.0.1:8002/v1/chat/completions" \
   -H "Content-Type: application/json" \
   -d '{
@@ -169,7 +196,11 @@ curl -sS -X POST "http://127.0.0.1:8002/v1/chat/completions" \
         "sink_size": 4,
         "local_window_size": 256,
         "heavy_hitter_size": 128,
-        "session_score_alpha": 0.5
+        "session_score_alpha": 0.5,
+        "role_alpha_system": 0.9,
+        "role_alpha_user": 0.3,
+        "role_alpha_assistant": 0.3,
+        "role_alpha_tool": 0.7
       }
     }
   }'
@@ -201,15 +232,13 @@ curl -sS -X POST "http://127.0.0.1:8000/v1/evaluate" \
 
 - `baseline`：手写逐步缓存解码，不做 cache 裁剪。
 - `streamingLLM`：prompt 在进入生成前会先裁成 `sink + recent`；生成时继续按位置滑窗裁剪，cache 预算是 `sink_size + local_window_size`。
-- `h2o`：当前主路径不会在 prefill 阶段读取 full-prompt attention。实现流程是：
-  1. 对完整 prompt 做普通 prefill
-  2. 用全零 `score_counters` 初始化当前活动 cache
-  3. 若 prompt 已超预算，首次裁剪会退化为“零分 + recent tie-break”，效果接近 `sink + recent`
-  4. 只有在 decode 过程中，且满足“本步需要裁剪”或“达到 `collect_period`”时，才会调用带 attention 的增量前向并累积分数
+- `h2o`：当前主路径在 prefill 阶段通过 `SDPAAttentionCapture` 采集最后一个 query 位置的注意力分数做为初始化分数。实现流程是：
+  1. 对完整 prompt 做 prefill，同时采集注意力分数初始化 `score_counters`
+  2. 同时构造 `role_tags`，为每个 token 标注其消息角色（system/user/assistant/tool）
+  3. 若 prompt 已超预算，首次裁剪由 prefill attention 分数驱动
+  4. 只有在 decode 过程中，且满足"本步需要裁剪"或"达到 `collect_period`"时，才会调用带 attention 的增量前向并累积分数
   5. 分数只对当前活动 cache 生效；被驱逐 token 的历史分数不会保留
-  6. `chat/completions` 的会话模式里，跨轮恢复时会先对上一轮 `score_counters` 做 Max 归一化，再乘 `session_score_alpha`，然后只对严格追加的尾部 token 做增量续写
-
-如果旧文档还写着“h2o 用 full-prompt attention 完成首次 heavy-hitter 打分”，那已经不是当前实现。
+  6. `chat/completions` 的会话模式里，跨轮恢复时会根据每个 token 的角色执行差异化衰减（system 高保留、user/assistant 快速衰减、tool 适度保留），然后只对严格追加的尾部 token 做增量续写
 
 ## Python 侧调用
 
@@ -226,79 +255,6 @@ api = OracleKVProjectAPI(
 ```
 
 统一入口在 `src/api.py`。核心公开方法是 `evaluate(...)`。
-
-## 离线推理
-
-`offline_infer.py` 支持两种输入格式：
-
-- `jsonl`：每行一个样本，支持 `prompt` 或 `messages`
-- `tau2`：从 tau2 domain 目录读取 `tasks.json`、`split_tasks.json` 和可选的 `policy.md`
-
-### JSONL 输入格式
-
-```json
-{"id":"prompt_1","prompt":"请简述什么是 Transformer。"}
-{"id":"chat_1","messages":[{"role":"system","content":"你是一个简洁的中文助手。"},{"role":"user","content":"你的模型是什么？"}]}
-```
-
-仓库当前不再维护根目录 `data/` 示例集。JSONL 输入文件请自行准备，然后把路径传给 `--input-jsonl`。
-
-### JSONL 示例
-
-```bash
-python offline_infer.py \
-  --dataset-format jsonl \
-  --model-path ./local_models/Qwen3.5-9B \
-  --input-jsonl /path/to/offline_samples.jsonl \
-  --output-dir ./outputs/offline_infer \
-  --methods baseline streamingllm h2o \
-  --device cuda \
-  --dtype auto \
-  --max-new-tokens 80 \
-  --h2o-heavy-hitter-size 128
-```
-
-### tau2 domain 示例
-
-仓库内可直接使用的 airline domain 在：
-
-- `./tau2-bench/data/tau2/domains/airline`
-
-示例命令：
-
-```bash
-python offline_infer.py \
-  --dataset-format tau2 \
-  --tau2-domain-dir ./tau2-bench/data/tau2/domains/airline \
-  --tau2-split test \
-  --tau2-include-policy \
-  --model-path ./local_models/Qwen3.5-9B \
-  --output-dir ./outputs/offline_infer_tau2_airline \
-  --methods baseline streamingllm h2o \
-  --device cuda \
-  --dtype auto \
-  --max-new-tokens 80 \
-  --h2o-heavy-hitter-size 128
-```
-
-### 离线推理的当前语义
-
-- 当 `--methods` 传入多个方法时，脚本会按方法顺序拉起独立子进程，逐个完成推理，再汇总 `all_results.jsonl` 和 `summary.jsonl`。这样做主要是为了隔离显存状态，减少多方法混跑带来的碎片或 OOM。
-- `tau2` 模式会把每个 task 压成一条 `user` 消息；如果传了 `--tau2-include-policy`，会额外把 `policy.md` 放成一条 `system` 消息。
-- 因此 `offline_infer.py --dataset-format tau2` 适合做“单轮离线对比”，不等价于 tau2-bench 的真实多轮 agent 对话仿真。
-- `offline_infer.py` 的 `--attn-implementation auto` 在方法集合里包含 `h2o` 时会解析成 `eager`；如果你在长上下文上更关心 prefill 显存，可以显式传 `--attn-implementation sdpa` 再自行验证内存与结果。
-
-### 输出文件
-
-无论 `jsonl` 还是 `tau2` 模式，`--output-dir` 下都会生成：
-
-- `baseline.jsonl`
-- `streamingllm.jsonl`
-- `h2o.jsonl`
-- `all_results.jsonl`
-- `summary.jsonl`
-
-如果传入 `--save-step-trace`，每条结果还会带上 `step_trace` 字段，记录 `full_context_tokens`、`kept_tokens` 和 `kept_ratio`。
 
 ## tau2-bench 全链路接入
 
@@ -335,9 +291,9 @@ attention-by-role 分析脚本当前位于：
 ## 目录说明
 
 - `api_server.py`：HTTP 服务入口
-- `offline_infer.py`：离线批量推理入口
 - `src/api.py`：统一评测 API
 - `src/model.py`：模型加载、tokenization、cache 裁剪和 attention 聚合
+- `src/chat_format.py`：聊天格式化、角色标注、工具调用解析
 - `src/methods/baseline.py`：baseline policy
 - `src/methods/streaming_llm.py`：streamingLLM policy
 - `src/methods/h2o.py`：H2O policy

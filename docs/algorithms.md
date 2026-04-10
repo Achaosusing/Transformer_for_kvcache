@@ -7,8 +7,7 @@
 - `src/methods/h2o.py`
 - `src/api.py`
 - `src/model.py`
-
-如果旧说明里还写着“h2o 在 full prompt prefill 时读取 attention，并用真实 prompt attention 做首次 heavy-hitter 打分”，那已经不是当前主执行路径。
+- `src/chat_format.py`
 
 ## 1. 统一执行框架
 
@@ -35,7 +34,7 @@
 
 需要特别说明的是：
 
-- `prefill_next_token_logits_with_attention(...)` 虽然仍然存在于 `src/model.py`，但当前主执行路径并不使用它。
+- `prefill_next_token_logits_with_attention(...)` 在 eager 模式下用于 H2O prefill 阶段的注意力采集。
 - `save_step_trace=True` 只会额外记录 `full_context_tokens`、`kept_tokens` 和 `kept_ratio`，不会改变实际裁剪逻辑。
 
 ## 2. baseline
@@ -369,7 +368,55 @@ $$
 2. 当前实现没有被驱逐 token 的召回
 3. 当前实现也没有对被驱逐 token 做重算或回填
 
-### 4.8 Attention 实现选择的实现细节
+### 4.8 角色感知的跨轮衰减（Scheme C）
+
+在多轮会话中，跨轮恢复时会根据每个 token 的消息角色执行差异化衰减。
+
+#### 4.8.1 role_tags
+
+`H2ORuntimeState` 现在维护一个与 `score_counters` 等长的 `role_tags` 张量（`torch.int8`），为每个 cache 位置标注角色：
+
+| 常量 | 值 | 含义 |
+|------|------|------|
+| `ROLE_SYSTEM` | 0 | system 消息（系统提示、工具定义） |
+| `ROLE_USER` | 1 | user 消息 |
+| `ROLE_ASSISTANT` | 2 | 历史 assistant 消息 |
+| `ROLE_TOOL` | 3 | tool 调用返回结果 |
+| `ROLE_GENERATED` | 4 | 当前轮生成的 token |
+
+`role_tags` 由 `build_token_role_ids()` 在 `src/chat_format.py` 中构造，通过增量前缀 tokenize 确保与实际 token 序列精确对齐。
+
+`role_tags` 会在所有 state 操作中同步维护：
+
+1. eviction 时按 `keep_tensor` 裁剪
+2. 新 token 追加时标记为 `ROLE_GENERATED`
+3. `trim_h2o_state_tail` 时同步截断
+4. `clone_h2o_state` 时 clone 到目标设备
+
+#### 4.8.2 角色感知衰减逻辑
+
+`apply_role_aware_h2o_decay(score_counters, role_tags, role_alphas, default_alpha)` 的计算方式是：
+
+对于每个角色 $r$ 及其对应的 $\alpha_r$，取该角色的所有分数做 max 归一化后乘以 $\alpha_r$：
+
+$$
+S_i^{\text{decayed}} = \frac{S_i}{\max_{j: \text{role}(j) = r} S_j} \times \alpha_r \quad \text{其中 } r = \text{role}(i)
+$$
+
+默认角色 alpha 值：
+
+| 角色 | 默认 alpha | 含义 |
+|------|-----------|------|
+| system | 0.9 | 系统指令几乎不衰减，跨轮保留 |
+| tool | 0.7 | 工具返回适度保留，有跨轮价值 |
+| user | 0.3 | 快速衰减，让位给新轮内容 |
+| assistant | 0.3 | 同上 |
+
+当 `role_tags` 不可用或 `role_alphas` 未传入时，回退到旧版的统一 `apply_max_normalized_h2o_decay`。
+
+可通过 `method_configs` 中的 `role_alpha_system`、`role_alpha_user`、`role_alpha_assistant`、`role_alpha_tool` 自定义各角色 alpha。
+
+### 4.9 Attention 实现选择的实现细节
 
 `api_server.py` 中，`--attn-implementation auto` 会解析成 `sdpa`。
 
@@ -393,7 +440,7 @@ $$
 
 1. baseline：完整 prompt 直接 prefill
 2. streamingLLM：先静态裁 prompt，再 prefill
-3. h2o：完整 prompt 先 prefill，再按零分计数器进行必要的首次裁剪
+3. h2o：完整 prompt 做 prefill 时同时采集最后一个 query 位置的注意力分数，首次裁剪由 prefill attention 驱动
 
 ### 5.3 Decode 阶段差异
 
@@ -409,17 +456,248 @@ $$
 
 ## 6. 当前实现边界
 
-基于 `src/methods/*.py`、`src/api.py`、`src/model.py` 的核对，当前边界如下：
+基于 `src/methods/*.py`、`src/api.py`、`src/model.py`、`src/chat_format.py` 的核对，当前边界如下：
 
 1. streamingLLM 的 prompt 会在 prefill 前被静态裁剪；h2o 的 prompt 不会。
-2. H2O 的首次 heavy-hitter 选择不是来自真实 prompt attention，而是来自零初始化计数器加 recent tie-break。
-3. H2O 的分数只来自 decode-time attention，且只在选定的收集步更新。
+2. H2O 的首次 heavy-hitter 选择由 prefill 阶段采集的注意力分数驱动（Scheme D）。
+3. H2O 的分数在 prefill 时初始化（最后一个 query 的注意力），在 decode 过程中持续在线累积。
 4. `evict_period > 1` 时，cache 会临时超预算最多 `evict_period - 1` 个 token。
 5. 当前实现没有被驱逐 token 的召回、重计算或重新注入。
-6. `select_streaming_keep_indices(...)` 和 `prefill_next_token_logits_with_attention(...)` 仍在代码里，但不是当前主执行路径。
-7. 直接通过 Python 调 `OracleKVProjectAPI.evaluate(...)` 时，默认 `collect_period=1`；通过 `api_server.py` CLI 启动服务时，默认 `--collect-period 0` 会被解析成“跟随 `evict_period`”。
+6. 多轮会话中，跨轮恢复支持按角色差异化衰减（Scheme C），默认 system token 高保留、user/assistant token 快速衰减。
+7. `role_tags` 会在所有 state 操作（eviction、clone、trim）中同步维护。
+8. 直接通过 Python 调 `OracleKVProjectAPI.evaluate(...)` 时，默认 `collect_period=1`；通过 `api_server.py` CLI 启动服务时，默认 `--collect-period 0` 会被解析成"跟随 `evict_period`"。
+9. H2O 多轮 session 复用不再强制依赖 `session_id`。当 client 未传 `session_id` 时，服务端会自动通过 token 前缀匹配在快照池中查找上一轮的 snapshot，对任何标准 OpenAI 兼容 client 透明生效。快照保存也是无条件执行。
 
-## 7. 参数建议
+## 7. H2O 多轮会话完整流程图
+
+本节以流程图和配套说明的方式，完整描述当前 H2O 在 `POST /v1/chat/completions` 中的端到端行为，包括 session 命中条件、角色感知衰减、decode 循环和快照保存。
+
+### 7.1 总体流程图
+
+```mermaid
+flowchart TD
+    START(["POST /v1/chat/completions<br/>method=h2o"])
+    START --> PARSE["解析请求参数<br/>score_alpha, role_alphas<br/>policy, signature"]
+    PARSE --> TOKENIZE["format_prompt_ids → prompt_ids<br/>build_token_role_ids → role_ids"]
+    TOKENIZE --> HAS_SID{"req.session_id<br/>存在?"}
+
+    HAS_SID -- 是 --> LOOKUP_EXACT["LRU 精确查找<br/>get(session_id)"]
+    HAS_SID -- 否 --> LOOKUP_PREFIX["LRU 自动前缀匹配<br/>find_by_prefix(prompt_ids, signature)"]
+    LOOKUP_EXACT --> FOUND{"snapshot<br/>存在?"}
+    LOOKUP_PREFIX --> FOUND
+    FOUND -- 否 --> INIT
+    FOUND -- 是 --> MATCH{"5 项匹配检查"}
+
+    MATCH -- 不通过 --> INIT
+    MATCH -- 通过 --> RESTORE["restore_h2o_state<br/>clone GPU + role-aware decay"]
+    RESTORE --> CONTINUE["continue_h2o_state<br/>逐 token 处理追加部分"]
+    CONTINUE --> GENERATE
+
+    INIT["initialize_h2o_state<br/>prefill + SDPACapture 采集分数<br/>构造 role_tags<br/>若超预算: 首次裁剪"]
+    INIT --> GENERATE
+
+    GENERATE["generate_from_h2o_state<br/>自回归 decode 循环"]
+    GENERATE --> DECODE_LOOP
+
+    subgraph DECODE_LOOP ["Decode 循环 (每步)"]
+        direction TB
+        SAMPLE["sample_next_token<br/>采样下一个 token"]
+        SAMPLE --> EOS{"遇到 EOS?"}
+        EOS -- 是 --> LOOP_END(["退出循环"])
+        EOS -- 否 --> ADVANCE["_advance_h2o_state_with_token"]
+        ADVANCE --> CHECK_EVICT{"active+1 ><br/>budget+ep-1 ?"}
+        CHECK_EVICT -- 是 --> DO_EVICT["select_keep_tensor 裁剪<br/>score_counters, role_tags, KV cache"]
+        CHECK_EVICT -- 否 --> APPEND
+        DO_EVICT --> APPEND["追加新 token<br/>score=0, role=GENERATED"]
+        APPEND --> CHECK_COLLECT{"need_evict OR<br/>steps ≥ collect_period?"}
+        CHECK_COLLECT -- 是 --> COLLECT["SDPACapture 采集注意力<br/>累加到 score_counters"]
+        CHECK_COLLECT -- 否 --> SKIP["仅前向推理<br/>不采集注意力"]
+        COLLECT --> NEXT_STEP(["→ 下一步"])
+        SKIP --> NEXT_STEP
+    end
+
+    DECODE_LOOP --> SAVE_SNAP
+
+    subgraph SAVE_SNAP ["Session 快照保存（无条件）"]
+        direction TB
+        GEN_KEY["生成 store_key<br/>session_id 或 auto_{hash}_{msg_count}"]
+        GEN_KEY --> ALIGN["对齐 history_ids 与 generated_ids"]
+        ALIGN --> ALIGN_CASE{"对齐方式"}
+        ALIGN_CASE -- "history ⊇ gen" --> CLOSURE["continue 闭合 token"]
+        ALIGN_CASE -- "gen ⊇ history" --> TRIM["trim 多余 token"]
+        ALIGN_CASE -- "不匹配" --> SKIP_SAVE["跳过保存"]
+        CLOSURE --> STORE["clone state → CPU<br/>存入 LRU"]
+        TRIM --> STORE
+        STORE --> RESP
+        SKIP_SAVE --> RESP
+    end
+
+    RESP(["返回 ChatCompletion 响应"])
+```
+
+### 7.2 Session 查找策略
+
+服务端支持两种 session 查找模式，对 client 完全透明：
+
+**模式 1：显式 `session_id`（精确查找）**
+
+当请求中携带 `session_id` 时，服务端直接通过 `LRUSessionStore.get(session_id)` 做 O(1) 精确查找。这是向后兼容路径，适用于 tau-bench 等能主动注入 session_id 的 agent 框架。
+
+**模式 2：自动前缀匹配（无需 `session_id`）**
+
+当请求中没有 `session_id` 时，服务端自动调用 `LRUSessionStore.find_by_prefix(prompt_ids, signature)` 在快照池中查找：
+
+1. 取 `prompt_ids` 前 64 个 token 做 SHA-256 hash，在前缀索引中做 O(1) 候选查找
+2. 对候选快照做完整的 `history_token_ids` 前缀比对
+3. 选出最长匹配的快照（signature 必须一致）
+4. 如果 hash 未命中，回退到遍历全部快照（O(N)，N = max_sessions）
+
+这使得任何标准 OpenAI 兼容 client（MT-Bench、LangChain、OpenAI SDK 等）在多轮对话中都能自动复用上轮的 KV cache，无需任何适配。
+
+**两种模式找到快照后，都需要通过以下 5 项匹配检查：**
+
+| # | 条件 | 代码对应 | 含义 |
+|---|------|----------|------|
+| 1 | `snapshot.signature == signature` | sink_size、window_size、hh_size、evict_period、collect_period、alpha 全部一致 | 策略参数不能跨轮改变 |
+| 2 | `snapshot.tools == active_tools` | 工具定义列表完全一致 | 工具变化会导致 system prompt 变化 |
+| 3 | `len(messages) > len(snapshot.messages)` | 新请求消息条数严格大于快照 | 必须是追加而不是替换 |
+| 4 | `messages[:len(snap.messages)] == snap.messages` | 前缀完全匹配 | 历史消息不能被修改 |
+| 5 | `prompt_ids[:len(snap.history_token_ids)] == snap.history_token_ids` | token id 级别前缀一致 | 排除 tokenizer 差异或系统级变化 |
+
+如果任一条件不满足，回退到 `initialize_h2o_state()` 全量重算。
+
+**快照保存**
+
+生成结束后，快照**无条件保存**（不再依赖 `session_id` 是否存在）：
+- 有 `session_id`：用 `session_id` 作为存储 key
+- 无 `session_id`：自动生成 key `auto_{hash}_{msg_count}`（基于 prompt 前缀 hash + 消息条数）
+
+这保证了即使 client 从未传过 `session_id`，下一轮请求也能通过前缀匹配找到上轮快照。
+
+### 7.3 跨轮衰减流程（Scheme C）
+
+Session 命中后，`restore_h2o_state()` 会对 snapshot 中的 `score_counters` 执行衰减，流程如下：
+
+```mermaid
+flowchart TD
+    IN["score_counters + role_tags<br/>从 CPU snapshot clone 到 GPU"]
+    IN --> HAS_TAGS{"role_tags != None<br/>AND role_alphas != None?"}
+
+    HAS_TAGS -- 否 --> UNIFORM["统一衰减<br/>scores = scores / max × α"]
+    HAS_TAGS -- 是 --> SPLIT["按 role_tags 分组"]
+
+    SPLIT --> SYS["ROLE_SYSTEM 组<br/>scores[sys] = scores[sys] / max_sys × 0.9"]
+    SPLIT --> USR["ROLE_USER 组<br/>scores[usr] = scores[usr] / max_usr × 0.3"]
+    SPLIT --> AST["ROLE_ASSISTANT 组<br/>scores[ast] = scores[ast] / max_ast × 0.3"]
+    SPLIT --> TL["ROLE_TOOL 组<br/>scores[tl] = scores[tl] / max_tl × 0.7"]
+    SPLIT --> OTHER["其他角色<br/>scores[o] = scores[o] / max_o × default_α"]
+
+    SYS --> MERGED["合并 decayed score_counters"]
+    USR --> MERGED
+    AST --> MERGED
+    TL --> MERGED
+    OTHER --> MERGED
+    UNIFORM --> OUT
+
+    MERGED --> OUT["restored state<br/>steps_since_collect = 0"]
+```
+
+**衰减的设计意图：**
+
+- **system (α=0.9)**：系统指令和工具定义在整个会话生命周期里都重要，跨轮几乎不衰减。这保证了 system prompt 中的关键 token 在 eviction 竞争中长期占优。
+- **tool (α=0.7)**：工具调用返回的事实性数据（如订单号、查询结果）在后续轮次仍可能被引用，适度保留。
+- **user / assistant (α=0.3)**：上一轮的具体问答内容在新轮中通常不再是 attention 焦点，快速衰减让位给新轮 token。
+- **default_α = session_score_alpha**：对 `role_alphas` 中未覆盖的角色（如 `ROLE_GENERATED`），使用请求指定的统一 alpha。
+
+衰减后，只有追加的新 token（`appended_ids`）会通过 `continue_h2o_state()` 逐个走 `_advance_h2o_state_with_token()`，在线累积新的注意力分数。
+
+### 7.4 Decode 循环详细说明
+
+`generate_from_h2o_state()` 进入自回归循环，每步执行 `_advance_h2o_state_with_token()`：
+
+**步骤 1：检查是否需要 eviction**
+
+```
+next_total = active_token_count + 1
+need_evict = next_total > budget + evict_period - 1
+```
+
+当 `evict_period=1` 时，条件等价于 `next_total > budget`，即严格限制在预算内。`evict_period > 1` 时允许临时超预算。
+
+**步骤 2：执行 eviction（如果需要）**
+
+1. 将当前 `score_counters` 追加一个零分（为新 token 预留位置）
+2. 调用 `policy.select_keep_tensor(next_total, extended_scores)` 确定保留集合
+3. 保留集合由三部分组成：
+   - **Sink 区**：前 `sink_size` 个位置（必保留）
+   - **Local Window 区**：最后 `local_window_size` 个位置（必保留）
+   - **Heavy Hitter 区**：中间区 `[sink_end, recent_start)` 中按累计分数 top-k 选出的 `heavy_hitter_size` 个位置
+4. 过滤掉新 token 位置（`keep < active_token_count`），只裁剪旧 cache
+5. 同步裁剪 `score_counters`、`role_tags`、`past_key_values`
+
+**步骤 3：追加新 token**
+
+- `score_counters` 追加 0
+- `role_tags` 追加 `ROLE_GENERATED`
+- `active_token_count += 1`
+- `steps_since_collect += 1`
+
+**步骤 4：决定是否采集注意力**
+
+```
+need_collect = need_evict or steps_since_collect >= collect_period
+```
+
+- 如果需要采集：通过 `SDPAAttentionCapture` wrapper 拦截 `F.scaled_dot_product_attention`，提取最后一个 query 对所有 key 的注意力分布（跨头平均、跨层平均），累加到 `score_counters`
+- 如果不需要：仅调用 `next_token_logits_from_cache()` 做普通前向推理
+
+### 7.5 快照保存流程
+
+生成完成后，快照**无条件保存**（不再依赖 `session_id` 是否存在）：
+
+1. 确定存储 key：
+   - 有 `session_id` → 直接用 `session_id`
+   - 无 `session_id` → 自动生成 `auto_{hash}_{msg_count}`（基于 prompt 前 64 token 的 hash + 消息条数）
+2. 构造包含 assistant 回复的完整 `history_ids`
+2. 将 `history_ids` 与 `generated_ids` 进行对齐，两种情况：
+
+   | 情况 | 条件 | 处理 |
+   |------|------|------|
+   | history ⊇ generated | `history_suffix_ids` 前缀 = `generated_ids` | 通过 `continue_h2o_state()` 补走闭合 token（如 `<\|im_end\|>` 等标记） |
+   | generated ⊇ history | `generated_ids` 前缀 = `history_suffix_ids` | 通过 `trim_h2o_state_tail()` 裁掉多余的尾部 |
+   | 不匹配 | 两者前缀不一致 | 跳过保存 |
+
+3. 对齐后，将 state clone 到 CPU 存入 `LRUSessionStore`（有界 LRU，默认 64 个 session）
+
+### 7.6 角色标注的生命周期
+
+`role_tags` 从构造到使用的完整生命周期：
+
+```
+build_token_role_ids()                     ← 初始构造（每个消息按角色打标）
+       │
+       ▼
+initialize_h2o_state(role_ids=...)         ← 转为 torch.int8 tensor
+       │
+       ├─ eviction: role_tags[keep_tensor] ← 随 KV cache 同步裁剪
+       ├─ advance:  cat(role_tags, [GENERATED]) ← 新 token 标记为 GENERATED
+       ├─ trim:     role_tags[:keep_count]  ← 尾部截断时同步
+       ├─ clone:    role_tags.to(device)    ← CPU↔GPU 搬运时同步
+       │
+       ▼
+restore_h2o_state(role_alphas=...)         ← 跨轮衰减时按标签分组
+       │
+       ▼
+continue_h2o_state(appended_ids)           ← 新 token 继续标记为 GENERATED
+       │
+       ▼
+generate → advance → eviction ...          ← 循环中持续同步
+       │
+       ▼
+clone_h2o_state("cpu") → LRU store         ← 快照保存
+```
+
+## 8. 参数建议
 
 ### baseline
 
@@ -455,3 +733,5 @@ baseline 没有算法级裁剪参数，主要受模型与采样参数控制。
 2. `heavy_hitter_size` 越小，越依赖 decode-time scoring 是否能稳定找出长期重要 token。
 3. `collect_period = 1` 最接近“每步都在线更新”的 H2O。
 4. 如果优先考虑吞吐，可以一起增大 `evict_period` 和 `collect_period`，但要接受分数更新更稀疏、cache 约束更松的代价。
+5. 多轮会话中，`session_score_alpha` 作为 `default_alpha` 用于 `role_alphas` 中未覆盖角色的衰减。
+6. `role_alpha_system`（默认 0.9）、`role_alpha_tool`（默认 0.7）等值可以按场景调整。有大量 system prompt 或 tool 调用的场景，建议保持 system/tool 较高的 alpha。

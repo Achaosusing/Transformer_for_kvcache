@@ -1,13 +1,99 @@
 from __future__ import annotations
 
 import copy
+import threading
 from dataclasses import dataclass
 from typing import Any
 
 import torch
+import torch.nn.functional as _F
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from .chat_format import format_canonical_chat
+
+
+class SDPAAttentionCapture:
+    """Wrap ``F.scaled_dot_product_attention`` to collect last-query attention
+    weights while keeping the optimised SDPA kernel for the actual output.
+
+    For single-token decode (query length 1), the extra Q·K^T matmul per layer
+    is a batched vector–matrix multiply and adds negligible overhead.
+    """
+
+    _lock = threading.Lock()
+
+    def __init__(self, expected_tokens: int, device: torch.device) -> None:
+        self._expected_tokens = expected_tokens
+        self._acc = torch.zeros(expected_tokens, dtype=torch.float32, device=device)
+        self._valid_layers = 0
+        self._original_sdpa: Any = None
+
+    # ---- context manager ---------------------------------------------------
+    def __enter__(self) -> "SDPAAttentionCapture":
+        self._lock.acquire()
+        self._original_sdpa = _F.scaled_dot_product_attention
+        capture = self
+
+        def _wrapper(
+            query: torch.Tensor,
+            key: torch.Tensor,
+            value: torch.Tensor,
+            attn_mask: torch.Tensor | None = None,
+            dropout_p: float = 0.0,
+            is_causal: bool = False,
+            scale: float | None = None,
+            **kwargs: Any,
+        ) -> torch.Tensor:
+            # --- lightweight score extraction for the last query row --------
+            d = query.shape[-1]
+            sf = scale if scale is not None else d ** -0.5
+            q = query[:, :, -1:, :]                           # [B, Hq, 1, D]
+            k = key                                           # [B, Hk, S, D]
+            nq, nk = q.shape[1], k.shape[1]
+            if nk == 0:
+                return capture._original_sdpa(
+                    query, key, value,
+                    attn_mask=attn_mask, dropout_p=dropout_p,
+                    is_causal=is_causal, scale=scale, **kwargs,
+                )
+            if nq != nk:                                       # GQA
+                k = k.repeat_interleave(nq // nk, dim=1)
+            raw = torch.matmul(q, k.transpose(-2, -1)) * sf   # [B, H, 1, S]
+            if attn_mask is not None:
+                if attn_mask.ndim >= 3:
+                    raw = raw + attn_mask[:, :, -1:, : raw.shape[-1]].to(raw.dtype)
+                elif attn_mask.ndim == 2:
+                    raw = raw + attn_mask[-1:, : raw.shape[-1]].to(raw.dtype)
+            vec = torch.softmax(raw.float(), dim=-1)[0, :, 0, :].mean(dim=0)
+
+            et = capture._expected_tokens
+            if vec.numel() == et:
+                capture._acc.add_(vec.to(capture._acc.device))
+            elif vec.numel() < et:
+                capture._acc[-vec.numel() :].add_(vec.to(capture._acc.device))
+            else:
+                capture._acc.add_(vec[-et:].to(capture._acc.device))
+            capture._valid_layers += 1
+
+            # --- original SDPA (flash / mem-efficient kernel) ---------------
+            return capture._original_sdpa(
+                query, key, value,
+                attn_mask=attn_mask, dropout_p=dropout_p,
+                is_causal=is_causal, scale=scale, **kwargs,
+            )
+
+        _F.scaled_dot_product_attention = _wrapper
+        return self
+
+    def __exit__(self, *exc: Any) -> bool:
+        _F.scaled_dot_product_attention = self._original_sdpa
+        self._lock.release()
+        return False
+
+    def get_scores(self) -> torch.Tensor:
+        if self._valid_layers == 0:
+            return self._acc
+        return self._acc / self._valid_layers
 
 
 @dataclass
@@ -270,17 +356,30 @@ class LocalTransformerModel:
         expected_tokens: int,
     ) -> tuple[torch.Tensor, Any, torch.Tensor]:
         input_ids = torch.tensor([[token_id]], dtype=torch.long, device=self.model.device)
-        out = self.model(
-            input_ids=input_ids,
-            past_key_values=past_key_values,
-            use_cache=True,
-            output_attentions=True,
-        )
-        attention_scores = self._aggregate_last_query_attention(
-            out.attentions,
-            expected_tokens=expected_tokens,
-            device=self.model.device,
-        )
+
+        if self.attn_implementation == "sdpa":
+            # Capture attention weights via SDPA wrapper – avoids the eager
+            # fallback caused by output_attentions=True.
+            with SDPAAttentionCapture(expected_tokens, self.model.device) as cap:
+                out = self.model(
+                    input_ids=input_ids,
+                    past_key_values=past_key_values,
+                    use_cache=True,
+                )
+            attention_scores = cap.get_scores()
+        else:
+            out = self.model(
+                input_ids=input_ids,
+                past_key_values=past_key_values,
+                use_cache=True,
+                output_attentions=True,
+            )
+            attention_scores = self._aggregate_last_query_attention(
+                out.attentions,
+                expected_tokens=expected_tokens,
+                device=self.model.device,
+            )
+
         return out.logits[0, -1, :].float(), out.past_key_values, attention_scores
 
     @staticmethod
