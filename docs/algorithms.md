@@ -466,7 +466,7 @@ $$
 6. 多轮会话中，跨轮恢复支持按角色差异化衰减（Scheme C），默认 system token 高保留、user/assistant token 快速衰减。
 7. `role_tags` 会在所有 state 操作（eviction、clone、trim）中同步维护。
 8. 直接通过 Python 调 `OracleKVProjectAPI.evaluate(...)` 时，默认 `collect_period=1`；通过 `api_server.py` CLI 启动服务时，默认 `--collect-period 0` 会被解析成"跟随 `evict_period`"。
-9. H2O 多轮 session 复用不再强制依赖 `session_id`。当 client 未传 `session_id` 时，服务端会自动通过 token 前缀匹配在快照池中查找上一轮的 snapshot，对任何标准 OpenAI 兼容 client 透明生效。快照保存也是无条件执行。
+9. H2O 多轮 session 复用通过 `--enable-session` 显式启用。启用后，当 client 未传 `session_id` 时，服务端会自动通过 token 前缀匹配在快照池中查找上一轮的 snapshot，对任何标准 OpenAI 兼容 client 透明生效。未启用时（默认），每轮请求独立执行 prefill + decode，退化为单轮 H2O，便于作为消融实验的对照基线。
 
 ## 7. H2O 多轮会话完整流程图
 
@@ -479,7 +479,10 @@ flowchart TD
     START(["POST /v1/chat/completions<br/>method=h2o"])
     START --> PARSE["解析请求参数<br/>score_alpha, role_alphas<br/>policy, signature"]
     PARSE --> TOKENIZE["format_prompt_ids → prompt_ids<br/>build_token_role_ids → role_ids"]
-    TOKENIZE --> HAS_SID{"req.session_id<br/>存在?"}
+    TOKENIZE --> SESSION_ON{"--enable-session<br/>已启用?"}
+
+    SESSION_ON -- 否 --> INIT
+    SESSION_ON -- 是 --> HAS_SID{"req.session_id<br/>存在?"}
 
     HAS_SID -- 是 --> LOOKUP_EXACT["LRU 精确查找<br/>get(session_id)"]
     HAS_SID -- 否 --> LOOKUP_PREFIX["LRU 自动前缀匹配<br/>find_by_prefix(prompt_ids, signature)"]
@@ -518,9 +521,11 @@ flowchart TD
 
     DECODE_LOOP --> SAVE_SNAP
 
-    subgraph SAVE_SNAP ["Session 快照保存（无条件）"]
+    subgraph SAVE_SNAP ["Session 快照保存"]
         direction TB
-        GEN_KEY["生成 store_key<br/>session_id 或 auto_{hash}_{msg_count}"]
+        SAVE_ENABLED{"--enable-session?"}
+        SAVE_ENABLED -- 否 --> RESP
+        SAVE_ENABLED -- 是 --> GEN_KEY["生成 store_key<br/>session_id 或 auto_{hash}_{msg_count}"]
         GEN_KEY --> ALIGN["对齐 history_ids 与 generated_ids"]
         ALIGN --> ALIGN_CASE{"对齐方式"}
         ALIGN_CASE -- "history ⊇ gen" --> CLOSURE["continue 闭合 token"]

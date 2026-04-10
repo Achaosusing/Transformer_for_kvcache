@@ -281,6 +281,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-sessions", type=int, default=64,
         help="Maximum number of H2O session snapshots to keep in memory (LRU eviction).",
     )
+    parser.add_argument(
+        "--enable-session", action="store_true", default=False,
+        help="Enable H2O multi-turn session reuse (snapshot save/restore, role-aware "
+             "decay, automatic prefix matching). When disabled (default), every H2O "
+             "request is treated as a standalone turn — useful as an ablation baseline.",
+    )
     return parser
 
 
@@ -319,6 +325,7 @@ def main() -> None:
         attn_implementation=attn_impl,
     )
     h2o_sessions = LRUSessionStore(args.max_sessions)
+    enable_session: bool = args.enable_session
 
     def _h2o_chat_response(
         req: ChatCompletionRequest,
@@ -378,10 +385,12 @@ def main() -> None:
         state = None
 
         # --- Session lookup: explicit session_id OR automatic prefix match ---
-        if req.session_id:
-            snapshot = h2o_sessions.get(req.session_id)
-        else:
-            snapshot = h2o_sessions.find_by_prefix(prompt_ids, signature)
+        snapshot = None
+        if enable_session:
+            if req.session_id:
+                snapshot = h2o_sessions.get(req.session_id)
+            else:
+                snapshot = h2o_sessions.find_by_prefix(prompt_ids, signature)
 
         if snapshot is not None:
             messages_match = (
@@ -439,50 +448,51 @@ def main() -> None:
             normalized_messages + [assistant_history_message]
         )
 
-        # --- Snapshot save: always attempt, auto-generate key if no session_id ---
-        store_key = req.session_id or f"auto_{LRUSessionStore._hash_token_prefix(prompt_ids, LRUSessionStore._PREFIX_HASH_LEN)}_{len(normalized_messages)}"
+        # --- Snapshot save: only when session reuse is enabled ---
+        if enable_session:
+            store_key = req.session_id or f"auto_{LRUSessionStore._hash_token_prefix(prompt_ids, LRUSessionStore._PREFIX_HASH_LEN)}_{len(normalized_messages)}"
 
-        history_ids = evaluator.model.format_prompt_ids(
-            prompt=None,
-            messages=normalized_history_messages,
-            max_input_tokens=None,
-            add_generation_prompt=False,
-            tools=active_tools,
-            canonical_chat=True,
-        )
-        eos_token_id = evaluator.model.tokenizer.eos_token_id
-        inserted_generated_ids = generated_ids
-        if inserted_generated_ids and eos_token_id is not None and inserted_generated_ids[-1] == eos_token_id:
-            inserted_generated_ids = inserted_generated_ids[:-1]
-        history_suffix_ids = history_ids[len(prompt_ids):]
-
-        snapshot_state = state
-        can_store_snapshot = False
-        if len(history_suffix_ids) >= len(inserted_generated_ids) and history_suffix_ids[: len(inserted_generated_ids)] == inserted_generated_ids:
-            closure_ids = history_suffix_ids[len(inserted_generated_ids):]
-            if closure_ids:
-                _, snapshot_state = evaluator.continue_h2o_state(
-                    closure_ids,
-                    policy,
-                    snapshot_state,
-                    evict_period=args.evict_period,
-                    collect_period=collect_period,
-                )
-            can_store_snapshot = True
-        elif len(inserted_generated_ids) > len(history_suffix_ids) and inserted_generated_ids[: len(history_suffix_ids)] == history_suffix_ids:
-            trim_count = len(inserted_generated_ids) - len(history_suffix_ids)
-            snapshot_state = evaluator.trim_h2o_state_tail(snapshot_state, trim_count)
-            can_store_snapshot = True
-
-        if can_store_snapshot:
-            h2o_sessions.set(store_key, H2OChatSessionSnapshot(
-                session_id=store_key,
+            history_ids = evaluator.model.format_prompt_ids(
+                prompt=None,
                 messages=normalized_history_messages,
+                max_input_tokens=None,
+                add_generation_prompt=False,
                 tools=active_tools,
-                history_token_ids=history_ids,
-                runtime_state=evaluator.clone_h2o_state(snapshot_state, "cpu"),
-                signature=signature,
-            ))
+                canonical_chat=True,
+            )
+            eos_token_id = evaluator.model.tokenizer.eos_token_id
+            inserted_generated_ids = generated_ids
+            if inserted_generated_ids and eos_token_id is not None and inserted_generated_ids[-1] == eos_token_id:
+                inserted_generated_ids = inserted_generated_ids[:-1]
+            history_suffix_ids = history_ids[len(prompt_ids):]
+
+            snapshot_state = state
+            can_store_snapshot = False
+            if len(history_suffix_ids) >= len(inserted_generated_ids) and history_suffix_ids[: len(inserted_generated_ids)] == inserted_generated_ids:
+                closure_ids = history_suffix_ids[len(inserted_generated_ids):]
+                if closure_ids:
+                    _, snapshot_state = evaluator.continue_h2o_state(
+                        closure_ids,
+                        policy,
+                        snapshot_state,
+                        evict_period=args.evict_period,
+                        collect_period=collect_period,
+                    )
+                can_store_snapshot = True
+            elif len(inserted_generated_ids) > len(history_suffix_ids) and inserted_generated_ids[: len(history_suffix_ids)] == history_suffix_ids:
+                trim_count = len(inserted_generated_ids) - len(history_suffix_ids)
+                snapshot_state = evaluator.trim_h2o_state_tail(snapshot_state, trim_count)
+                can_store_snapshot = True
+
+            if can_store_snapshot:
+                h2o_sessions.set(store_key, H2OChatSessionSnapshot(
+                    session_id=store_key,
+                    messages=normalized_history_messages,
+                    tools=active_tools,
+                    history_token_ids=history_ids,
+                    runtime_state=evaluator.clone_h2o_state(snapshot_state, "cpu"),
+                    signature=signature,
+                ))
 
         choice_message: dict[str, Any] = {
             "role": "assistant",

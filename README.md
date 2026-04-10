@@ -78,7 +78,8 @@ python api_server.py \
   --h2o-local-window-size 256 \
   --h2o-heavy-hitter-size 128 \
   --evict-period 1 \
-  --collect-period 0
+  --collect-period 0 \
+  --enable-session
 ```
 
 ### 服务端关键参数
@@ -91,6 +92,8 @@ python api_server.py \
 - `--h2o-sink-size` / `--h2o-local-window-size` / `--h2o-heavy-hitter-size`：H2O 预算参数。
 - `--evict-period`：按批次裁剪 cache。`1` 表示每个 decode step 都严格裁剪；更大的值会减少裁剪开销，但允许 cache 临时超预算 `evict_period - 1` 个 token。
 - `--collect-period`：H2O 收集 attention 的步频。`0` 表示跟随 `evict_period`；`1` 表示每步收集；更大值会减少 attention 读取次数。
+- `--enable-session`：**显式开关**，启用 H2O 多轮 session 复用（快照保存/恢复、角色感知衰减、自动前缀匹配）。默认关闭，每轮独立执行，便于消融对比。
+- `--max-sessions`：session 快照 LRU 池大小（默认 64）。仅在 `--enable-session` 启用时有意义。
 - `--attn-implementation`：服务端默认 `auto`，当前会解析为 `sdpa`。这是为了避免长 prefill 时的全量 attention 矩阵 OOM。
 
 ## 接口列表
@@ -109,8 +112,9 @@ python api_server.py \
   - `/v1/evaluate` 默认同时运行 `baseline`、`streamingllm`、`h2o`
   - `/v1/chat/completions` 和 `/v1/completions` 默认只运行 `baseline`
 - `/v1/chat/completions` 和 `/v1/completions` 也可以通过请求体里的 `methods` 指定多方法，此时响应里的 `choices` 会额外带上 `method` 字段。
-- `h2o` 的 `/v1/chat/completions` 支持**自动多轮 session 复用**：服务端会自动通过 token 前缀匹配找到上一轮的 KV cache 快照并增量续写，无需 client 传递任何额外字段。这对所有标准 OpenAI 兼容 client 透明生效（MT-Bench、LangChain、OpenAI SDK 等）。
+- `h2o` 的 `/v1/chat/completions` 支持**多轮 session 复用**（需通过 `--enable-session` 启用）：服务端会自动通过 token 前缀匹配找到上一轮的 KV cache 快照并增量续写，无需 client 传递任何额外字段。这对所有标准 OpenAI 兼容 client 透明生效（MT-Bench、LangChain、OpenAI SDK 等）。
 - 也支持可选的 `session_id` 字段作为精确查找的快捷路径（向后兼容）。
+- 未启用 `--enable-session` 时，H2O 每轮独立执行 prefill + decode，退化为单轮 H2O，便于作为消融实验的对照基线。
 - session 复用路径只在"单方法 `h2o` chat 请求"里生效；当前不支持和 `max_input_tokens` 组合使用。
 - `h2o` 的 chat 路径支持 OpenAI 风格的 `tools`、`tool_choice`（当前不支持显式对象形式的 `tool_choice`），响应里会在适用时返回 `tool_calls`。
 
