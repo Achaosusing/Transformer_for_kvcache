@@ -20,6 +20,7 @@ from src.chat_format import (
     ROLE_SYSTEM,
     ROLE_TOOL,
     ROLE_USER,
+    build_token_role_and_turn_ids,
     build_token_role_ids,
     extract_tool_calls_from_text,
     normalize_chat_messages,
@@ -213,6 +214,8 @@ def _build_h2o_session_signature(
         int(evict_period),
         int(collect_period),
         float(alpha),
+        float(method_cfg.get("dta_gamma", 1.0)),
+        float(method_cfg.get("current_turn_ratio", 0.6)),
     )
 
 
@@ -251,7 +254,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--allow-remote-files", action="store_true")
     parser.add_argument(
         "--method",
-        choices=["baseline", "streamingllm", "streaming_llm", "h2o"],
+        choices=["baseline", "streamingllm", "streaming_llm", "h2o", "dta_h2o"],
         default=None,
         help="If set, this server instance always evaluates with one method.",
     )
@@ -287,6 +290,23 @@ def build_parser() -> argparse.ArgumentParser:
              "decay, automatic prefix matching). When disabled (default), every H2O "
              "request is treated as a standalone turn — useful as an ablation baseline.",
     )
+    # DTA-H2O specific parameters.
+    parser.add_argument(
+        "--dta-gamma", type=float, default=0.95,
+        help="DTA-H2O temporal decay factor (0,1). Applied per attention collection step.",
+    )
+    parser.add_argument(
+        "--dta-current-turn-ratio", type=float, default=0.6,
+        help="Fraction of heavy-hitter budget reserved for current turn tokens.",
+    )
+    parser.add_argument(
+        "--dta-ghost-buffer-size", type=int, default=32,
+        help="Size of the eviction ghost buffer for anti-cascade protection (0=disabled).",
+    )
+    parser.add_argument(
+        "--dta-system-anchor", action="store_true", default=True,
+        help="Protect system-role tokens from eviction (DTA-H2O).",
+    )
     return parser
 
 
@@ -305,6 +325,16 @@ def main() -> None:
             "sink_size": args.h2o_sink_size,
             "local_window_size": args.h2o_local_window_size,
             "heavy_hitter_size": args.h2o_heavy_hitter_size,
+        }
+    elif fixed_method == "dta_h2o":
+        fixed_method_configs[fixed_method] = {
+            "sink_size": args.h2o_sink_size,
+            "local_window_size": args.h2o_local_window_size,
+            "heavy_hitter_size": args.h2o_heavy_hitter_size,
+            "dta_gamma": args.dta_gamma,
+            "current_turn_ratio": args.dta_current_turn_ratio,
+            "system_anchor": args.dta_system_anchor,
+            "ghost_buffer_size": args.dta_ghost_buffer_size,
         }
 
     # Resolve attention implementation
@@ -337,7 +367,10 @@ def main() -> None:
         if req.session_id and req.max_input_tokens is not None:
             raise HTTPException(status_code=400, detail="session_id cannot be combined with max_input_tokens yet")
 
-        method_cfg = req_method_configs.get("h2o", {})
+        # Determine which H2O variant is in use.
+        h2o_method_key = "dta_h2o" if "dta_h2o" in req_method_configs or fixed_method == "dta_h2o" else "h2o"
+        method_cfg = req_method_configs.get(h2o_method_key, req_method_configs.get("h2o", {}))
+        dta_gamma = float(method_cfg.get("dta_gamma", 1.0 if h2o_method_key == "h2o" else args.dta_gamma))
         score_alpha = float(method_cfg.get("session_score_alpha", 0.5))
         if score_alpha < 0.0:
             raise HTTPException(status_code=400, detail="session_score_alpha must be >= 0")
@@ -350,7 +383,7 @@ def main() -> None:
             ROLE_TOOL: float(method_cfg.get("role_alpha_tool", 0.7)),
         }
 
-        policy = evaluator._build_policy("h2o", method_cfg)
+        policy = evaluator._build_policy(h2o_method_key, method_cfg)
         signature = _build_h2o_session_signature(
             method_cfg,
             evict_period=args.evict_period,
@@ -367,18 +400,32 @@ def main() -> None:
         )
         prompt_len = len(prompt_ids)
 
-        # Build per-token role ids for role-aware decay.
-        role_ids = build_token_role_ids(
-            normalized_messages,
-            evaluator.model.tokenizer,
-            tools=active_tools,
-            add_generation_prompt=True,
-        )
+        # Build per-token role ids (and turn ids for DTA-H2O).
+        turn_ids_list: list[int] | None = None
+        if h2o_method_key == "dta_h2o":
+            role_ids, turn_ids_list = build_token_role_and_turn_ids(
+                normalized_messages,
+                evaluator.model.tokenizer,
+                tools=active_tools,
+                add_generation_prompt=True,
+            )
+        else:
+            role_ids = build_token_role_ids(
+                normalized_messages,
+                evaluator.model.tokenizer,
+                tools=active_tools,
+                add_generation_prompt=True,
+            )
         # Align with possible truncation from max_input_tokens.
         if len(role_ids) > prompt_len:
             role_ids = role_ids[len(role_ids) - prompt_len:]
+            if turn_ids_list is not None:
+                turn_ids_list = turn_ids_list[len(turn_ids_list) - prompt_len:]
         elif len(role_ids) < prompt_len:
             role_ids = role_ids + [ROLE_ASSISTANT] * (prompt_len - len(role_ids))
+            if turn_ids_list is not None:
+                last_turn = turn_ids_list[-1] if turn_ids_list else 0
+                turn_ids_list = turn_ids_list + [last_turn] * (prompt_len - len(turn_ids_list))
 
         t0 = time.perf_counter()
         cached_logits = None
@@ -414,10 +461,12 @@ def main() -> None:
                         state,
                         evict_period=args.evict_period,
                         collect_period=collect_period,
+                        dta_gamma=dta_gamma,
                     )
 
         if cached_logits is None or state is None:
-            cached_logits, state = evaluator.initialize_h2o_state(prompt_ids, policy, role_ids=role_ids)
+            cached_logits, state = evaluator.initialize_h2o_state(
+                prompt_ids, policy, role_ids=role_ids, turn_ids_list=turn_ids_list)
 
         generated_ids, traces, _, state = evaluator.generate_from_h2o_state(
             cached_logits=cached_logits,
@@ -431,6 +480,7 @@ def main() -> None:
             prompt_len=prompt_len,
             evict_period=args.evict_period,
             collect_period=collect_period,
+            dta_gamma=dta_gamma,
         )
         elapsed = time.perf_counter() - t0
 
@@ -477,6 +527,7 @@ def main() -> None:
                         snapshot_state,
                         evict_period=args.evict_period,
                         collect_period=collect_period,
+                        dta_gamma=dta_gamma,
                     )
                 can_store_snapshot = True
             elif len(inserted_generated_ids) > len(history_suffix_ids) and inserted_generated_ids[: len(history_suffix_ids)] == history_suffix_ids:
@@ -505,7 +556,7 @@ def main() -> None:
             "index": 0,
             "message": choice_message,
             "finish_reason": "tool_calls" if response_tool_calls else "stop",
-            "method": "h2o",
+            "method": h2o_method_key,
         }
         if req.save_step_trace:
             choice["step_trace"] = [trace.model_dump() if hasattr(trace, "model_dump") else trace.__dict__ for trace in traces]
@@ -586,10 +637,10 @@ def main() -> None:
             raise HTTPException(status_code=400, detail="Explicit tool_choice objects are not supported yet")
         active_tools = None if req.tool_choice == "none" else normalize_tool_definitions(req.tools)
 
-        if req.tools and (len(method_keys) != 1 or method_keys[0] != "h2o"):
-            raise HTTPException(status_code=400, detail="tools are currently supported only for single-method h2o chat requests")
+        if req.tools and (len(method_keys) != 1 or method_keys[0] not in ("h2o", "dta_h2o")):
+            raise HTTPException(status_code=400, detail="tools are currently supported only for single-method h2o/dta_h2o chat requests")
 
-        if len(method_keys) == 1 and method_keys[0] == "h2o":
+        if len(method_keys) == 1 and method_keys[0] in ("h2o", "dta_h2o"):
             return _h2o_chat_response(
                 req, req_method_configs, normalized_messages,
                 active_tools, max_new_tokens,

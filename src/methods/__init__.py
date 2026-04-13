@@ -1,4 +1,5 @@
 from .baseline import BaselineFullAttentionPolicy
+from .dta_h2o import DTAH2OPolicy
 from .h2o import H2OPolicy
 from .streaming_llm import StreamingLLMPolicy
 
@@ -7,12 +8,14 @@ METHODS = {
     "streamingllm": StreamingLLMPolicy,
     "streaming_llm": StreamingLLMPolicy,
     "h2o": H2OPolicy,
+    "dta_h2o": DTAH2OPolicy,
 }
 
 __all__ = [
     "BaselineFullAttentionPolicy",
     "StreamingLLMPolicy",
     "H2OPolicy",
+    "DTAH2OPolicy",
     "METHODS",
 ]
 

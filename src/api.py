@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import copy
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 import torch
 
 from .chat_format import ROLE_GENERATED
 from .methods import METHODS, prune_streaming_prompt
+from .methods.dta_h2o import DTAH2OPolicy
 from .model import LocalTransformerModel, StepTrace
 from .utils import normalize_sample
 
@@ -24,12 +26,84 @@ class EvalResult:
 
 
 @dataclass
+class GhostEntry:
+    score: float
+    role: int
+    turn_id: int
+
+
+class GhostBuffer:
+    """Fixed-capacity ring buffer tracking recently evicted token metadata."""
+
+    def __init__(self, capacity: int) -> None:
+        self.capacity = capacity
+        self.entries: list[GhostEntry] = []
+        self._ptr: int = 0
+
+    def record_eviction(
+        self,
+        scores: torch.Tensor,
+        role_tags: torch.Tensor | None,
+        turn_ids: torch.Tensor | None,
+        evicted_indices: list[int],
+    ) -> None:
+        for idx in evicted_indices:
+            entry = GhostEntry(
+                score=scores[idx].item(),
+                role=role_tags[idx].item() if role_tags is not None else -1,
+                turn_id=turn_ids[idx].item() if turn_ids is not None else -1,
+            )
+            if len(self.entries) < self.capacity:
+                self.entries.append(entry)
+            else:
+                self.entries[self._ptr] = entry
+            self._ptr = (self._ptr + 1) % self.capacity
+
+    def get_anti_cascade_boost(
+        self,
+        current_scores: torch.Tensor,
+        turn_ids: torch.Tensor,
+        current_turn: int,
+    ) -> torch.Tensor | None:
+        if not self.entries or current_scores.numel() == 0:
+            return None
+        turn_evict_count: dict[int, int] = {}
+        for e in self.entries:
+            if e.turn_id >= 0:
+                turn_evict_count[e.turn_id] = turn_evict_count.get(e.turn_id, 0) + 1
+        threshold = max(1, self.capacity // 4)
+        endangered_turns = {
+            t for t, c in turn_evict_count.items()
+            if c >= threshold and t != current_turn
+        }
+        if not endangered_turns:
+            return None
+        boost = torch.zeros_like(current_scores)
+        max_score = current_scores.max().item()
+        if max_score <= 0:
+            return None
+        for turn in endangered_turns:
+            mask = turn_ids == turn
+            if mask.any():
+                factor = turn_evict_count[turn] / self.capacity
+                boost[mask] = max_score * 0.1 * factor
+        return boost
+
+    def clear(self) -> None:
+        self.entries.clear()
+        self._ptr = 0
+
+
+@dataclass
 class H2ORuntimeState:
     past_key_values: Any
     score_counters: torch.Tensor
     active_token_count: int
     steps_since_collect: int = 0
     role_tags: torch.Tensor | None = None  # per-position role id (ROLE_*)
+    turn_ids: torch.Tensor | None = None  # per-position turn index
+    current_turn_id: int = 0
+    ghost_buffer: GhostBuffer | None = None
 
 
 class OracleKVProjectAPI:
@@ -71,6 +145,15 @@ class OracleKVProjectAPI:
                 local_window_size=int(method_cfg.get("local_window_size", 256)),
                 heavy_hitter_size=int(method_cfg.get("heavy_hitter_size", 128)),
             )
+        if key == "dta_h2o":
+            return METHODS[key](
+                sink_size=int(method_cfg.get("sink_size", 4)),
+                local_window_size=int(method_cfg.get("local_window_size", 256)),
+                heavy_hitter_size=int(method_cfg.get("heavy_hitter_size", 128)),
+                current_turn_ratio=float(method_cfg.get("current_turn_ratio", 0.6)),
+                system_anchor=bool(method_cfg.get("system_anchor", True)),
+                ghost_buffer_size=int(method_cfg.get("ghost_buffer_size", 32)),
+            )
         return METHODS[key]()
 
     @staticmethod
@@ -81,19 +164,30 @@ class OracleKVProjectAPI:
             raise RuntimeError("Attention score length does not match H2O cache length")
         score_counters.add_(attention_scores.to(device=score_counters.device, dtype=score_counters.dtype))
 
+    @staticmethod
+    def _accumulate_dta_h2o_scores(
+        score_counters: torch.Tensor,
+        attention_scores: torch.Tensor,
+        gamma: float,
+    ) -> None:
+        if score_counters.numel() == 0:
+            return
+        if attention_scores.shape[0] != score_counters.shape[0]:
+            raise RuntimeError("Attention score length does not match H2O cache length")
+        score_counters.mul_(gamma)
+        score_counters.add_(attention_scores.to(device=score_counters.device, dtype=score_counters.dtype))
+
     def initialize_h2o_state(
         self,
         token_ids: list[int],
         policy: Any,
         role_ids: list[int] | None = None,
+        turn_ids_list: list[int] | None = None,
     ) -> tuple[torch.Tensor, H2ORuntimeState]:
         device = self.model.model.device
         active_token_count = len(token_ids)
 
         # --- Scheme D: collect prefill attention scores via SDPA capture ---
-        # Instead of leaving scores at zero and relying on recency tie-break
-        # for the initial eviction, we extract the last-query attention from
-        # the prefill forward pass so that the first prune is informed.
         from .model import SDPAAttentionCapture
 
         if self.model.attn_implementation == "sdpa":
@@ -107,7 +201,6 @@ class OracleKVProjectAPI:
             past_key_values = out.past_key_values
             score_counters = cap.get_scores()
         else:
-            # Eager fallback: use output_attentions for the prefill.
             cached_logits, past_key_values, score_counters = (
                 self.model.prefill_next_token_logits_with_attention(token_ids)
             )
@@ -124,13 +217,38 @@ class OracleKVProjectAPI:
         else:
             role_tags = None
 
+        # Build turn_ids tensor (DTA-H2O).
+        turn_ids: torch.Tensor | None = None
+        current_turn_id = 0
+        if turn_ids_list is not None:
+            turn_ids = torch.tensor(turn_ids_list[:active_token_count], dtype=torch.int16, device=device)
+            if turn_ids.numel() < active_token_count:
+                last_turn = turn_ids_list[-1] if turn_ids_list else 0
+                pad = torch.full(
+                    (active_token_count - turn_ids.numel(),),
+                    last_turn, dtype=torch.int16, device=device,
+                )
+                turn_ids = torch.cat([turn_ids, pad])
+            current_turn_id = int(turn_ids.max().item())
+
+        # Initialize ghost buffer for DTA-H2O.
+        ghost_buffer: GhostBuffer | None = None
+        if isinstance(policy, DTAH2OPolicy) and policy.ghost_buffer_size > 0:
+            ghost_buffer = GhostBuffer(policy.ghost_buffer_size)
+
         # Initial pruning – now informed by prefill attention scores.
         if active_token_count > policy.cache_budget:
-            keep_tensor = policy.select_keep_tensor(active_token_count, score_counters)
+            if isinstance(policy, DTAH2OPolicy) and turn_ids is not None and role_tags is not None:
+                keep_tensor = policy.select_keep_tensor_tiered(
+                    active_token_count, score_counters, role_tags, turn_ids)
+            else:
+                keep_tensor = policy.select_keep_tensor(active_token_count, score_counters)
             score_counters = score_counters[keep_tensor]
             past_key_values = self.model.prune_past_key_values(past_key_values, keep_tensor)
             if role_tags is not None:
                 role_tags = role_tags[keep_tensor]
+            if turn_ids is not None:
+                turn_ids = turn_ids[keep_tensor]
             active_token_count = keep_tensor.numel()
 
         return cached_logits, H2ORuntimeState(
@@ -138,6 +256,9 @@ class OracleKVProjectAPI:
             score_counters=score_counters,
             active_token_count=active_token_count,
             role_tags=role_tags,
+            turn_ids=turn_ids,
+            current_turn_id=current_turn_id,
+            ghost_buffer=ghost_buffer,
         )
 
     def continue_h2o_state(
@@ -147,6 +268,7 @@ class OracleKVProjectAPI:
         state: H2ORuntimeState,
         evict_period: int = 1,
         collect_period: int = 1,
+        dta_gamma: float = 1.0,
     ) -> tuple[torch.Tensor | None, H2ORuntimeState]:
         cached_logits: torch.Tensor | None = None
         for token_id in token_ids:
@@ -156,6 +278,7 @@ class OracleKVProjectAPI:
                 state=state,
                 evict_period=evict_period,
                 collect_period=collect_period,
+                dta_gamma=dta_gamma,
             )
         return cached_logits, state
 
@@ -172,6 +295,7 @@ class OracleKVProjectAPI:
         prompt_len: int,
         evict_period: int = 1,
         collect_period: int = 1,
+        dta_gamma: float = 1.0,
     ) -> tuple[list[int], list[StepTrace], torch.Tensor, H2ORuntimeState]:
         generated_ids: list[int] = []
         traces: list[StepTrace] = []
@@ -200,6 +324,7 @@ class OracleKVProjectAPI:
                 state=state,
                 evict_period=evict_period,
                 collect_period=collect_period,
+                dta_gamma=dta_gamma,
             )
 
         return generated_ids, traces, cached_logits, state
@@ -215,6 +340,9 @@ class OracleKVProjectAPI:
             active_token_count=state.active_token_count,
             steps_since_collect=state.steps_since_collect,
             role_tags=state.role_tags.detach().to(device=device).clone() if state.role_tags is not None else None,
+            turn_ids=state.turn_ids.detach().to(device=device).clone() if state.turn_ids is not None else None,
+            current_turn_id=state.current_turn_id,
+            ghost_buffer=copy.deepcopy(state.ghost_buffer) if state.ghost_buffer is not None else None,
         )
 
     @staticmethod
@@ -295,12 +423,17 @@ class OracleKVProjectAPI:
                 default_alpha=alpha,
             )
         else:
-            # Fallback to the original uniform decay.
             restored.score_counters = self.apply_max_normalized_h2o_decay(
                 restored.score_counters,
                 alpha,
             )
         restored.steps_since_collect = 0
+
+        # DTA-H2O: increment turn counter and reset ghost buffer for new turn.
+        restored.current_turn_id += 1
+        if restored.ghost_buffer is not None:
+            restored.ghost_buffer.clear()
+
         return restored
 
     def trim_h2o_state_tail(
@@ -322,6 +455,8 @@ class OracleKVProjectAPI:
         state.score_counters = state.score_counters[:keep_count]
         if state.role_tags is not None:
             state.role_tags = state.role_tags[:keep_count]
+        if state.turn_ids is not None:
+            state.turn_ids = state.turn_ids[:keep_count]
         state.past_key_values = self.model.prune_past_key_values(state.past_key_values, keep_tensor)
         state.active_token_count = keep_count
         state.steps_since_collect = 0
@@ -334,25 +469,68 @@ class OracleKVProjectAPI:
         state: H2ORuntimeState,
         evict_period: int = 1,
         collect_period: int = 1,
+        dta_gamma: float = 1.0,
     ) -> tuple[torch.Tensor, H2ORuntimeState]:
-        zero = torch.zeros(1, dtype=state.score_counters.dtype, device=state.score_counters.device)
+        device = state.score_counters.device
+        zero = torch.zeros(1, dtype=state.score_counters.dtype, device=device)
 
         next_total_tokens = state.active_token_count + 1
         need_evict = next_total_tokens > policy.cache_budget + evict_period - 1
         if need_evict:
             extended_scores = torch.cat([state.score_counters, zero])
-            keep_tensor = policy.select_keep_tensor(next_total_tokens, extended_scores)
+
+            # DTA-H2O: apply anti-cascade boost before eviction decision.
+            if state.ghost_buffer is not None and state.turn_ids is not None:
+                new_turn_tag = torch.tensor(
+                    [state.current_turn_id], dtype=torch.int16, device=device)
+                extended_turns = torch.cat([state.turn_ids, new_turn_tag])
+                boost = state.ghost_buffer.get_anti_cascade_boost(
+                    extended_scores, extended_turns, state.current_turn_id)
+                if boost is not None:
+                    extended_scores = extended_scores + boost
+
+            # DTA-H2O: use tiered selection with system anchor.
+            if (isinstance(policy, DTAH2OPolicy)
+                    and state.turn_ids is not None
+                    and state.role_tags is not None):
+                new_turn_tag = torch.tensor(
+                    [state.current_turn_id], dtype=torch.int16, device=device)
+                new_role_tag = torch.tensor(
+                    [ROLE_GENERATED], dtype=state.role_tags.dtype, device=device)
+                extended_turns = torch.cat([state.turn_ids, new_turn_tag])
+                extended_roles = torch.cat([state.role_tags, new_role_tag])
+                keep_tensor = policy.select_keep_tensor_tiered(
+                    next_total_tokens, extended_scores,
+                    extended_roles, extended_turns)
+            else:
+                keep_tensor = policy.select_keep_tensor(next_total_tokens, extended_scores)
+
             keep_tensor = keep_tensor[keep_tensor < state.active_token_count]
+
+            # DTA-H2O: record evictions in ghost buffer.
+            if state.ghost_buffer is not None:
+                kept_set = set(keep_tensor.tolist())
+                evicted = [i for i in range(state.active_token_count) if i not in kept_set]
+                if evicted:
+                    state.ghost_buffer.record_eviction(
+                        state.score_counters, state.role_tags,
+                        state.turn_ids, evicted)
+
             state.score_counters = state.score_counters[keep_tensor]
             if state.role_tags is not None:
                 state.role_tags = state.role_tags[keep_tensor]
+            if state.turn_ids is not None:
+                state.turn_ids = state.turn_ids[keep_tensor]
             state.past_key_values = self.model.prune_past_key_values(state.past_key_values, keep_tensor)
             state.active_token_count = keep_tensor.numel()
 
         state.score_counters = torch.cat([state.score_counters, zero])
         if state.role_tags is not None:
-            new_tag = torch.tensor([ROLE_GENERATED], dtype=state.role_tags.dtype, device=state.role_tags.device)
+            new_tag = torch.tensor([ROLE_GENERATED], dtype=state.role_tags.dtype, device=device)
             state.role_tags = torch.cat([state.role_tags, new_tag])
+        if state.turn_ids is not None:
+            new_turn = torch.tensor([state.current_turn_id], dtype=torch.int16, device=device)
+            state.turn_ids = torch.cat([state.turn_ids, new_turn])
         state.active_token_count += 1
         state.steps_since_collect += 1
 
@@ -363,7 +541,10 @@ class OracleKVProjectAPI:
                 state.past_key_values,
                 expected_tokens=state.active_token_count,
             )
-            self._accumulate_h2o_scores(state.score_counters, attention_scores)
+            if isinstance(policy, DTAH2OPolicy) and dta_gamma < 1.0:
+                self._accumulate_dta_h2o_scores(state.score_counters, attention_scores, dta_gamma)
+            else:
+                self._accumulate_h2o_scores(state.score_counters, attention_scores)
             state.steps_since_collect = 0
         else:
             cached_logits, state.past_key_values = self.model.next_token_logits_from_cache(
@@ -492,6 +673,7 @@ class OracleKVProjectAPI:
         prompt_len: int,
         evict_period: int = 1,
         collect_period: int = 1,
+        dta_gamma: float = 1.0,
     ) -> tuple[list[int], list[StepTrace]]:
         cached_logits, state = self.initialize_h2o_state(token_ids, policy)
         generated_ids, traces, _, _ = self.generate_from_h2o_state(
@@ -506,6 +688,7 @@ class OracleKVProjectAPI:
             prompt_len=prompt_len,
             evict_period=evict_period,
             collect_period=collect_period,
+            dta_gamma=dta_gamma,
         )
         return generated_ids, traces
 
@@ -576,6 +759,8 @@ class OracleKVProjectAPI:
                         )
                     elapsed = time.perf_counter() - t0
                 else:
+                    method_method_cfg = cfg.get(method, {})
+                    dta_gamma = float(method_method_cfg.get("dta_gamma", 1.0))
                     t0 = time.perf_counter()
                     generated_ids, traces = self._generate_with_h2o(
                         token_ids=full_ids,
@@ -588,6 +773,7 @@ class OracleKVProjectAPI:
                         prompt_len=prompt_len,
                         evict_period=evict_period,
                         collect_period=collect_period,
+                        dta_gamma=dta_gamma,
                     )
                     elapsed = time.perf_counter() - t0
                 output_text = self.model.tokenizer.decode(generated_ids, skip_special_tokens=True)

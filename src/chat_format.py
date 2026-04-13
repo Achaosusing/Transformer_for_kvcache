@@ -371,6 +371,113 @@ def build_token_role_ids(
     return role_ids
 
 
+def build_token_role_and_turn_ids(
+    messages: list[dict[str, Any]],
+    tokenizer: Any,
+    *,
+    tools: list[dict[str, Any]] | None = None,
+    add_generation_prompt: bool,
+) -> tuple[list[int], list[int]]:
+    """Return (role_ids, turn_ids) aligned with tokenized canonical chat.
+
+    Turn boundaries: system = turn 0, each user message increments the turn
+    counter.  Assistant/tool messages inherit the turn of the preceding user.
+    """
+    normalized_messages = normalize_chat_messages(messages)
+    normalized_tools = normalize_tool_definitions(tools)
+    if not normalized_messages:
+        raise ValueError("No messages provided")
+
+    # (text_fragment, role_id, turn_id)
+    fragments: list[tuple[str, int, int]] = []
+    message_index = 0
+    turn_counter = 0  # system is turn 0
+
+    if normalized_tools:
+        frag = "<|im_start|>system\n"
+        frag += _TOOL_SYSTEM_PREFIX
+        for tool in normalized_tools:
+            frag += "\n" + json.dumps(tool, ensure_ascii=False)
+        frag += "\n</tools>"
+        frag += _TOOL_SYSTEM_SUFFIX
+        if normalized_messages[0]["role"] == "system":
+            system_content = render_chat_content(normalized_messages[0].get("content")).strip()
+            if system_content:
+                frag += "\n\n" + system_content
+            message_index = 1
+        frag += "<|im_end|>\n"
+        fragments.append((frag, ROLE_SYSTEM, 0))
+    elif normalized_messages[0]["role"] == "system":
+        system_content = render_chat_content(normalized_messages[0].get("content")).strip()
+        frag = "<|im_start|>system\n" + system_content + "<|im_end|>\n"
+        fragments.append((frag, ROLE_SYSTEM, 0))
+        message_index = 1
+
+    while message_index < len(normalized_messages):
+        message = normalized_messages[message_index]
+        role = message["role"]
+        if role == "system":
+            message_index += 1
+            continue
+        if role == "user":
+            turn_counter += 1
+            content = render_chat_content(message.get("content")).strip()
+            frag = f"<|im_start|>user\n{content}<|im_end|>\n"
+            fragments.append((frag, ROLE_USER, turn_counter))
+            message_index += 1
+            continue
+        if role == "assistant":
+            reasoning, content = _extract_reasoning_and_content(message)
+            body = _render_tool_call_blocks(content, message.get("tool_calls"))
+            frag = "<|im_start|>assistant\n"
+            frag += f"<think>\n{reasoning}\n</think>\n\n"
+            frag += body
+            frag += "<|im_end|>\n"
+            fragments.append((frag, ROLE_ASSISTANT, turn_counter))
+            message_index += 1
+            continue
+        if role == "tool":
+            frag = "<|im_start|>user"
+            while message_index < len(normalized_messages) and normalized_messages[message_index]["role"] == "tool":
+                tool_content = render_chat_content(normalized_messages[message_index].get("content")).strip()
+                frag += "\n<tool_response>\n" + tool_content + "\n</tool_response>"
+                message_index += 1
+            frag += "<|im_end|>\n"
+            fragments.append((frag, ROLE_TOOL, turn_counter))
+            continue
+        raise ValueError(f"Unexpected message role: {role}")
+
+    if add_generation_prompt:
+        fragments.append(("<|im_start|>assistant\n<think>\n\n</think>\n\n", ROLE_ASSISTANT, turn_counter))
+
+    full_text = "".join(frag for frag, _, _ in fragments)
+    full_ids = tokenizer.encode(full_text, add_special_tokens=False)
+    total_tokens = len(full_ids)
+
+    role_ids: list[int] = []
+    turn_ids: list[int] = []
+    prefix = ""
+    prev_len = 0
+    for frag_text, role_id, turn_id in fragments:
+        prefix += frag_text
+        cur_len = len(tokenizer.encode(prefix, add_special_tokens=False))
+        frag_token_count = cur_len - prev_len
+        role_ids.extend([role_id] * frag_token_count)
+        turn_ids.extend([turn_id] * frag_token_count)
+        prev_len = cur_len
+
+    if len(role_ids) < total_tokens:
+        last_role = fragments[-1][1] if fragments else ROLE_USER
+        last_turn = fragments[-1][2] if fragments else 0
+        role_ids.extend([last_role] * (total_tokens - len(role_ids)))
+        turn_ids.extend([last_turn] * (total_tokens - len(turn_ids)))
+    elif len(role_ids) > total_tokens:
+        role_ids = role_ids[:total_tokens]
+        turn_ids = turn_ids[:total_tokens]
+
+    return role_ids, turn_ids
+
+
 def _parse_tool_argument(raw_value: str) -> Any:
     value = raw_value.strip()
     if not value:
