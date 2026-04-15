@@ -129,7 +129,7 @@ class OracleKVProjectAPI:
             attn_implementation=attn_implementation,
         )
 
-    def _build_policy(self, method: str, method_cfg: dict[str, Any]):
+    def build_policy(self, method: str, method_cfg: dict[str, Any]):
         key = method.lower()
         if key not in METHODS:
             raise ValueError(f"Unsupported method: {method}")
@@ -717,7 +717,7 @@ class OracleKVProjectAPI:
         flat_results: list[dict[str, Any]] = []
 
         for method in methods:
-            policy = self._build_policy(method, cfg.get(method, {}))
+            policy = self.build_policy(method, cfg.get(method, {}))
             method_key = method.lower()
             rows: list[dict[str, Any]] = []
 

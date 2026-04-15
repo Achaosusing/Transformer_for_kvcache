@@ -63,15 +63,17 @@ def test_dta_gamma_one_equals_vanilla_accumulation() -> None:
 # ---------------------------------------------------------------------------
 
 def test_system_anchor_tokens_always_kept() -> None:
-    """System-role tokens should never be evicted when system_anchor=True."""
+    """System-role tokens should be prioritised and kept when they fit in budget."""
+    # budget = 2 + 2 + 3 = 7
+    # protected = sink[0,1] + recent[8,9] = 4  →  remaining_budget = 3
+    # system anchors = tokens [2,3,4] = 3  ≤  remaining_budget = 3  → all fit
     policy = DTAH2OPolicy(
         sink_size=2,
         local_window_size=2,
-        heavy_hitter_size=2,
+        heavy_hitter_size=3,
         current_turn_ratio=0.5,
         system_anchor=True,
     )
-    # Total budget = 2 + 2 + 2 = 6
     total_tokens = 10
     scores = torch.rand(total_tokens)
     # Mark tokens 2,3,4 as ROLE_SYSTEM (outside sink and recent window)
@@ -85,7 +87,7 @@ def test_system_anchor_tokens_always_kept() -> None:
     keep = policy.select_keep_tensor_tiered(total_tokens, scores, role_tags, turn_ids)
     kept_set = set(keep.tolist())
 
-    # System tokens 2, 3, 4 must be in kept set
+    # All three system tokens must be kept (they fit within the remaining budget)
     assert 2 in kept_set
     assert 3 in kept_set
     assert 4 in kept_set
@@ -115,6 +117,32 @@ def test_system_anchor_disabled() -> None:
     keep = policy.select_keep_tensor_tiered(total_tokens, scores, role_tags, turn_ids)
     # Only 3 tokens should be kept (budget=3)
     assert keep.numel() == 3
+
+
+def test_system_anchor_respects_cache_budget_when_system_tokens_overflow() -> None:
+    """System anchors should stay best-effort and never exceed cache budget."""
+    policy = DTAH2OPolicy(
+        sink_size=1,
+        local_window_size=1,
+        heavy_hitter_size=1,
+        current_turn_ratio=1.0,
+        system_anchor=True,
+    )
+    total_tokens = 8
+    scores = torch.arange(total_tokens, dtype=torch.float32)
+    role_tags = torch.tensor(
+        [ROLE_USER, ROLE_SYSTEM, ROLE_SYSTEM, ROLE_SYSTEM, ROLE_SYSTEM, ROLE_SYSTEM, ROLE_SYSTEM, ROLE_USER],
+        dtype=torch.int8,
+    )
+    turn_ids = torch.ones(total_tokens, dtype=torch.int16)
+
+    keep = policy.select_keep_tensor_tiered(total_tokens, scores, role_tags, turn_ids)
+    kept = set(keep.tolist())
+
+    assert keep.numel() == policy.cache_budget
+    assert 0 in kept  # sink
+    assert 7 in kept  # recent
+    assert 6 in kept  # highest-scoring system anchor wins the final slot
 
 
 # ---------------------------------------------------------------------------

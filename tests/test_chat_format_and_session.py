@@ -1,10 +1,23 @@
 from __future__ import annotations
 
 import torch
+from pydantic import ValidationError
 
-from api_server import _build_response_tool_calls
+from api_server import (
+    ChatCompletionRequest,
+    _build_response_tool_calls,
+    build_parser,
+)
+from src.session_store import build_h2o_session_signature
 from src.api import OracleKVProjectAPI
-from src.chat_format import extract_tool_calls_from_text, format_canonical_chat
+from src.chat_format import (
+    ROLE_ASSISTANT,
+    ROLE_SYSTEM,
+    ROLE_TOOL,
+    ROLE_USER,
+    extract_tool_calls_from_text,
+    format_canonical_chat,
+)
 
 
 def test_canonical_chat_keeps_history_prefix_stable() -> None:
@@ -80,3 +93,55 @@ def test_apply_max_normalized_h2o_decay_handles_all_zero_scores() -> None:
     decayed = OracleKVProjectAPI.apply_max_normalized_h2o_decay(scores, 0.5)
 
     assert torch.equal(decayed, scores)
+
+
+def test_h2o_session_signature_changes_with_runtime_config() -> None:
+    role_alphas = {
+        ROLE_SYSTEM: 0.9,
+        ROLE_USER: 0.3,
+        ROLE_ASSISTANT: 0.3,
+        ROLE_TOOL: 0.7,
+    }
+
+    sig_default = build_h2o_session_signature(
+        "dta_h2o",
+        {"sink_size": 4},
+        evict_period=1,
+        collect_period=1,
+        alpha=0.5,
+        role_alphas=role_alphas,
+    )
+    sig_no_anchor = build_h2o_session_signature(
+        "dta_h2o",
+        {"sink_size": 4, "system_anchor": False},
+        evict_period=1,
+        collect_period=1,
+        alpha=0.5,
+        role_alphas=role_alphas,
+    )
+    sig_role_decay = build_h2o_session_signature(
+        "dta_h2o",
+        {"sink_size": 4},
+        evict_period=1,
+        collect_period=1,
+        alpha=0.5,
+        role_alphas={**role_alphas, ROLE_TOOL: 0.5},
+    )
+
+    assert sig_default != sig_no_anchor
+    assert sig_default != sig_role_decay
+
+
+def test_parser_supports_disabling_dta_system_anchor() -> None:
+    args = build_parser().parse_args(["--model-path", "/tmp/model", "--no-dta-system-anchor"])
+
+    assert args.dta_system_anchor is False
+
+
+def test_chat_completion_request_requires_non_empty_messages() -> None:
+    try:
+        ChatCompletionRequest(messages=[])
+    except ValidationError:
+        pass
+    else:
+        raise AssertionError("Expected validation error for empty messages")

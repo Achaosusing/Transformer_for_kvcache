@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-import torch
+import threading
 
-from src.model import LocalTransformerModel
+import torch
+import torch.nn.functional as F
+
+from src.model import LocalTransformerModel, SDPAAttentionCapture
 
 
 class _DummyModel:
@@ -103,3 +106,26 @@ def test_prune_layered_cache_skips_linear_attention_layers() -> None:
     assert pruned.layers[0].keys.shape[2] == 3
     assert pruned.layers[0].values.shape[2] == 3
     assert torch.equal(pruned.layers[1].conv_states, conv_states)
+
+
+def test_sdpa_capture_only_collects_from_active_thread() -> None:
+    query = torch.randn(1, 1, 1, 4)
+    key = torch.randn(1, 1, 2, 4)
+    value = torch.randn(1, 1, 2, 4)
+    expected = F.scaled_dot_product_attention(query, key, value)
+
+    worker_result: dict[str, torch.Tensor] = {}
+
+    with SDPAAttentionCapture(expected_tokens=2, device=torch.device("cpu")) as cap:
+        captured = F.scaled_dot_product_attention(query, key, value)
+
+        def _worker() -> None:
+            worker_result["value"] = F.scaled_dot_product_attention(query, key, value)
+
+        thread = threading.Thread(target=_worker)
+        thread.start()
+        thread.join()
+
+    assert torch.allclose(captured, expected)
+    assert torch.allclose(worker_result["value"], expected)
+    assert cap._valid_layers == 1

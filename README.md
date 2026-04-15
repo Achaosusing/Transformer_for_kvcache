@@ -118,7 +118,7 @@ python api_server.py \
 - `--dta-gamma`：DTA-H2O 时间衰减因子（默认 0.95）。每次 attention 收集步执行 `S = gamma * S + s_new`，使旧分数指数衰减。
 - `--dta-current-turn-ratio`：DTA-H2O 当前轮次占 HH 预算的比例（默认 0.6）。剩余分配给历史轮次。
 - `--dta-ghost-buffer-size`：DTA-H2O 驱逐 Ghost Buffer 容量（默认 32，0=禁用）。用于反级联保护。
-- `--dta-system-anchor`：DTA-H2O 是否永久保护 ROLE_SYSTEM token 不被驱逐（默认启用）。
+- `--dta-system-anchor`：DTA-H2O 是否在固定 cache 预算内优先保留 `ROLE_SYSTEM` token（默认启用，可通过 `--no-dta-system-anchor` 关闭）。
 
 ## 接口列表
 
@@ -298,7 +298,7 @@ curl -sS -X POST "http://127.0.0.1:8003/v1/chat/completions" \
 - `dta_h2o`：在 `h2o` 基础上引入三项优化，解决多轮长对话中早期高频 Token 永久占据 HH 坑位的问题：
   1. **时间衰减 (Temporal Decay)**：将分数累加从 `S += s` 改为 `S = gamma * S + s`（默认 gamma=0.95），使旧 Token 的历史累积分数指数衰减，后续轮次的语义关键 Token 能浮出
   2. **分层驱逐 (Tiered Eviction)**：
-     - **System Anchor**：`ROLE_SYSTEM` 的 Token 被永久保护，不参与驱逐竞争（类似 sink 但按角色识别）
+     - **System Anchor**：`ROLE_SYSTEM` 的 Token 会在固定预算内被优先保留；当系统 token 数量超过剩余预算时，会优先保留分数更高/更新的部分
      - **轮次级预算分配**：HH 预算按 `current_turn_ratio`（默认 0.6）拆分给当前轮次和历史轮次，防止历史 Token 挤占当前轮次的表达空间
   3. **Ghost Buffer 反级联保护**：维护一个固定容量的 CPU 环形缓冲区，记录被驱逐 Token 的轮次分布。当某个历史轮次被密集驱逐时，为其存活 Token 添加小幅分数提升，防止整个轮次被连锁清空
   

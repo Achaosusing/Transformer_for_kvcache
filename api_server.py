@@ -6,15 +6,16 @@ import hashlib
 import json
 import time
 import uuid
-from collections import OrderedDict
-from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
-from fastapi import FastAPI, HTTPException
+import os
+
+from fastapi import Depends, FastAPI, HTTPException, Security
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 import uvicorn
 
-from src.api import H2ORuntimeState, OracleKVProjectAPI
+from src.api import OracleKVProjectAPI
 from src.chat_format import (
     ROLE_ASSISTANT,
     ROLE_SYSTEM,
@@ -25,6 +26,13 @@ from src.chat_format import (
     extract_tool_calls_from_text,
     normalize_chat_messages,
     normalize_tool_definitions,
+    render_chat_content,
+)
+from src.session_store import (
+    H2OChatSessionSnapshot,
+    LRUSessionStore,
+    build_h2o_session_signature,
+    hash_signature,
 )
 
 
@@ -36,21 +44,20 @@ class EvalRequest(BaseModel):
     temperature: float = 0.0
     top_p: float = 1.0
     stop_on_eos: bool = True
-    max_input_tokens: int | None = None
+    max_input_tokens: int | None = Field(default=None, gt=0)
     save_step_trace: bool = False
 
 
 class ChatMessage(BaseModel):
-    role: str
+    role: Literal["system", "user", "assistant", "tool"]
     content: Any = None
     tool_calls: list[dict[str, Any]] | None = None
     tool_call_id: str | None = None
     reasoning_content: str | None = None
 
-
 class ChatCompletionRequest(BaseModel):
     model: str | None = None
-    messages: list[ChatMessage]
+    messages: list[ChatMessage] = Field(min_length=1)
     session_id: str | None = None
     tools: list[dict[str, Any]] | None = None
     tool_choice: str | dict[str, Any] | None = None
@@ -60,163 +67,46 @@ class ChatCompletionRequest(BaseModel):
     stream: bool = False
     methods: list[str] | None = None
     method_configs: dict[str, dict[str, Any]] | None = None
-    max_input_tokens: int | None = None
+    max_input_tokens: int | None = Field(default=None, gt=0)
     save_step_trace: bool = False
 
 
 class CompletionRequest(BaseModel):
     model: str | None = None
-    prompt: str
+    prompt: str = Field(min_length=1)
     max_tokens: int | None = Field(default=None, gt=0)
     temperature: float = 0.0
     top_p: float = 1.0
     stream: bool = False
     methods: list[str] | None = None
     method_configs: dict[str, dict[str, Any]] | None = None
-    max_input_tokens: int | None = None
+    max_input_tokens: int | None = Field(default=None, gt=0)
     save_step_trace: bool = False
 
 
-@dataclass
-class H2OChatSessionSnapshot:
-    session_id: str
-    messages: list[dict[str, Any]]
-    tools: list[dict[str, Any]] | None
-    history_token_ids: list[int]
-    runtime_state: H2ORuntimeState
-    signature: tuple[Any, ...]
+def _validate_normalized_messages(messages: list[dict[str, Any]]) -> None:
+    for idx, message in enumerate(messages):
+        try:
+            render_chat_content(message.get("content"))
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid content for message {idx}: {exc}",
+            ) from exc
 
 
-class LRUSessionStore:
-    """Bounded LRU store for H2O session snapshots with automatic prefix matching.
-
-    Supports two lookup modes:
-    1. Exact key lookup via ``get(key)`` — used when the client provides a
-       ``session_id``.
-    2. Automatic token-prefix lookup via ``find_by_prefix(prompt_ids, signature)``
-       — scans all snapshots and returns the one whose ``history_token_ids`` is
-       the longest prefix of *prompt_ids* (with matching signature).  This makes
-       multi-turn session reuse work transparently for any OpenAI-compatible
-       client that does NOT send ``session_id``.
-    """
-
-    _PREFIX_HASH_LEN = 64  # number of leading tokens used for the fast hash index
-
-    def __init__(self, max_size: int) -> None:
-        self._store: OrderedDict[str, H2OChatSessionSnapshot] = OrderedDict()
-        self._max_size = max_size
-        # Fast index: hash of the first _PREFIX_HASH_LEN token ids → set of store keys.
-        self._prefix_index: dict[str, set[str]] = {}
-
-    @staticmethod
-    def _hash_token_prefix(token_ids: list[int], length: int = 64) -> str:
-        """Deterministic hash of the first *length* token ids."""
-        prefix = token_ids[:length]
-        raw = ",".join(map(str, prefix))
-        return hashlib.sha256(raw.encode()).hexdigest()[:16]
-
-    def get(self, key: str) -> H2OChatSessionSnapshot | None:
-        if key not in self._store:
-            return None
-        self._store.move_to_end(key)
-        return self._store[key]
-
-    def set(self, key: str, value: H2OChatSessionSnapshot) -> None:
-        # Remove old index entry if updating an existing key.
-        if key in self._store:
-            old_snap = self._store[key]
-            old_h = self._hash_token_prefix(old_snap.history_token_ids, self._PREFIX_HASH_LEN)
-            bucket = self._prefix_index.get(old_h)
-            if bucket is not None:
-                bucket.discard(key)
-                if not bucket:
-                    del self._prefix_index[old_h]
-            self._store.move_to_end(key)
-
-        self._store[key] = value
-
-        # Add to prefix index.
-        h = self._hash_token_prefix(value.history_token_ids, self._PREFIX_HASH_LEN)
-        self._prefix_index.setdefault(h, set()).add(key)
-
-        # Evict oldest entries if over capacity.
-        while len(self._store) > self._max_size:
-            evicted_key, evicted_snap = self._store.popitem(last=False)
-            eh = self._hash_token_prefix(evicted_snap.history_token_ids, self._PREFIX_HASH_LEN)
-            bucket = self._prefix_index.get(eh)
-            if bucket is not None:
-                bucket.discard(evicted_key)
-                if not bucket:
-                    del self._prefix_index[eh]
-
-    def find_by_prefix(
-        self,
-        prompt_ids: list[int],
-        signature: tuple[Any, ...],
-    ) -> H2OChatSessionSnapshot | None:
-        """Find the best snapshot whose ``history_token_ids`` is a prefix of
-        *prompt_ids* and whose signature matches.
-
-        Uses a two-stage strategy:
-        1. Hash the first *_PREFIX_HASH_LEN* tokens of *prompt_ids* and check
-           the index for candidate keys (O(1) average).
-        2. Among candidates (or all entries on hash miss), verify full prefix
-           match and pick the longest.
-
-        Returns ``None`` if no matching snapshot is found.
-        """
-        if not self._store:
-            return None
-
-        prompt_len = len(prompt_ids)
-        h = self._hash_token_prefix(prompt_ids, self._PREFIX_HASH_LEN)
-        candidate_keys = self._prefix_index.get(h)
-
-        if candidate_keys:
-            candidates = [(k, self._store[k]) for k in candidate_keys if k in self._store]
-        else:
-            # Fallback: scan all entries (handles cases where prompt is shorter
-            # than _PREFIX_HASH_LEN or hash bucket was pruned).
-            candidates = list(self._store.items())
-
-        best: H2OChatSessionSnapshot | None = None
-        best_len = 0
-
-        for key, snap in candidates:
-            if snap.signature != signature:
-                continue
-            hist_len = len(snap.history_token_ids)
-            if hist_len > prompt_len:
-                continue
-            if hist_len <= best_len:
-                continue
-            if prompt_ids[:hist_len] == snap.history_token_ids:
-                best = snap
-                best_len = hist_len
-
-        if best is not None:
-            self._store.move_to_end(best.session_id)
-
-        return best
+def _validate_tool_choice(tool_choice: str | dict[str, Any] | None) -> None:
+    if isinstance(tool_choice, dict):
+        raise HTTPException(status_code=400, detail="Explicit tool_choice objects are not supported yet")
+    if tool_choice in (None, "auto", "none"):
+        return
+    if tool_choice == "required":
+        raise HTTPException(status_code=400, detail="tool_choice='required' is not supported yet")
+    raise HTTPException(status_code=400, detail=f"Unsupported tool_choice: {tool_choice}")
 
 
-def _build_h2o_session_signature(
-    method_cfg: dict[str, Any],
-    *,
-    evict_period: int,
-    collect_period: int,
-    alpha: float,
-) -> tuple[Any, ...]:
-    return (
-        int(method_cfg.get("sink_size", 4)),
-        int(method_cfg.get("local_window_size", 256)),
-        int(method_cfg.get("heavy_hitter_size", 128)),
-        int(evict_period),
-        int(collect_period),
-        float(alpha),
-        float(method_cfg.get("dta_gamma", 1.0)),
-        float(method_cfg.get("current_turn_ratio", 0.6)),
-    )
+def _as_bad_request(exc: ValueError) -> HTTPException:
+    return HTTPException(status_code=400, detail=str(exc))
 
 
 def _build_response_tool_calls(
@@ -304,10 +194,291 @@ def build_parser() -> argparse.ArgumentParser:
         help="Size of the eviction ghost buffer for anti-cascade protection (0=disabled).",
     )
     parser.add_argument(
-        "--dta-system-anchor", action="store_true", default=True,
-        help="Protect system-role tokens from eviction (DTA-H2O).",
+        "--dta-system-anchor",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Prioritize system-role tokens within the cache budget (DTA-H2O).",
+    )
+    parser.add_argument(
+        "--api-key",
+        type=str,
+        default=None,
+        help="API key for Bearer token auth. Also reads API_KEY env var. "
+             "When set, all endpoints require 'Authorization: Bearer <key>'.",
     )
     return parser
+
+
+def _resolve_h2o_method_config(
+    req_method_configs: dict[str, Any],
+    fixed_method: str | None,
+    default_dta_gamma: float,
+) -> tuple[str, dict[str, Any], float, float, dict[int, float]]:
+    """Determine H2O variant, config, decay params, and role alphas."""
+    h2o_method_key = (
+        "dta_h2o"
+        if "dta_h2o" in req_method_configs or fixed_method == "dta_h2o"
+        else "h2o"
+    )
+    method_cfg = req_method_configs.get(
+        h2o_method_key, req_method_configs.get("h2o", {}),
+    )
+    dta_gamma = float(method_cfg.get(
+        "dta_gamma", 1.0 if h2o_method_key == "h2o" else default_dta_gamma,
+    ))
+    score_alpha = float(method_cfg.get("session_score_alpha", 0.5))
+    if score_alpha < 0.0:
+        raise HTTPException(
+            status_code=400, detail="session_score_alpha must be >= 0",
+        )
+
+    role_alphas: dict[int, float] = {
+        ROLE_SYSTEM: float(method_cfg.get("role_alpha_system", 0.9)),
+        ROLE_USER: float(method_cfg.get("role_alpha_user", 0.3)),
+        ROLE_ASSISTANT: float(method_cfg.get("role_alpha_assistant", 0.3)),
+        ROLE_TOOL: float(method_cfg.get("role_alpha_tool", 0.7)),
+    }
+    for _role_key, _alpha in role_alphas.items():
+        if not (0.0 <= _alpha <= 1.0):
+            raise HTTPException(
+                status_code=400,
+                detail=f"role_alpha for role {_role_key} must be in [0, 1], got {_alpha}",
+            )
+    return h2o_method_key, method_cfg, dta_gamma, score_alpha, role_alphas
+
+
+def _prepare_h2o_prompt_data(
+    evaluator: "OracleKVProjectAPI",
+    h2o_method_key: str,
+    normalized_messages: list[dict[str, Any]],
+    active_tools: list[dict[str, Any]] | None,
+    max_input_tokens: int | None,
+) -> tuple[list[int], list[int], list[int] | None]:
+    """Tokenize prompt and build per-token role and turn ID arrays."""
+    prompt_ids = evaluator.model.format_prompt_ids(
+        prompt=None,
+        messages=normalized_messages,
+        max_input_tokens=max_input_tokens,
+        add_generation_prompt=True,
+        tools=active_tools,
+        canonical_chat=True,
+    )
+    prompt_len = len(prompt_ids)
+
+    turn_ids_list: list[int] | None = None
+    if h2o_method_key == "dta_h2o":
+        role_ids, turn_ids_list = build_token_role_and_turn_ids(
+            normalized_messages,
+            evaluator.model.tokenizer,
+            tools=active_tools,
+            add_generation_prompt=True,
+        )
+    else:
+        role_ids = build_token_role_ids(
+            normalized_messages,
+            evaluator.model.tokenizer,
+            tools=active_tools,
+            add_generation_prompt=True,
+        )
+
+    if len(role_ids) > prompt_len:
+        role_ids = role_ids[len(role_ids) - prompt_len:]
+        if turn_ids_list is not None:
+            turn_ids_list = turn_ids_list[len(turn_ids_list) - prompt_len:]
+    elif len(role_ids) < prompt_len:
+        role_ids = role_ids + [ROLE_ASSISTANT] * (prompt_len - len(role_ids))
+        if turn_ids_list is not None:
+            last_turn = turn_ids_list[-1] if turn_ids_list else 0
+            turn_ids_list = turn_ids_list + [last_turn] * (
+                prompt_len - len(turn_ids_list)
+            )
+
+    return prompt_ids, role_ids, turn_ids_list
+
+
+def _save_h2o_session_snapshot(
+    h2o_sessions: LRUSessionStore,
+    evaluator: "OracleKVProjectAPI",
+    store_key: str,
+    normalized_history_messages: list[dict[str, Any]],
+    active_tools: list[dict[str, Any]] | None,
+    prompt_ids: list[int],
+    generated_ids: list[int],
+    state: "H2ORuntimeState",
+    policy: Any,
+    signature: tuple[Any, ...],
+    evict_period: int,
+    collect_period: int,
+    dta_gamma: float,
+) -> None:
+    """Persist H2O state snapshot if response tokens align with history template."""
+    history_ids = evaluator.model.format_prompt_ids(
+        prompt=None,
+        messages=normalized_history_messages,
+        max_input_tokens=None,
+        add_generation_prompt=False,
+        tools=active_tools,
+        canonical_chat=True,
+    )
+    eos_token_id = evaluator.model.tokenizer.eos_token_id
+    inserted_generated_ids = generated_ids
+    if (
+        inserted_generated_ids
+        and eos_token_id is not None
+        and inserted_generated_ids[-1] == eos_token_id
+    ):
+        inserted_generated_ids = inserted_generated_ids[:-1]
+    history_suffix_ids = history_ids[len(prompt_ids):]
+
+    snapshot_state = state
+    can_store = False
+    if (
+        len(history_suffix_ids) >= len(inserted_generated_ids)
+        and history_suffix_ids[: len(inserted_generated_ids)]
+        == inserted_generated_ids
+    ):
+        closure_ids = history_suffix_ids[len(inserted_generated_ids):]
+        if closure_ids:
+            _, snapshot_state = evaluator.continue_h2o_state(
+                closure_ids,
+                policy,
+                snapshot_state,
+                evict_period=evict_period,
+                collect_period=collect_period,
+                dta_gamma=dta_gamma,
+            )
+        can_store = True
+    elif (
+        len(inserted_generated_ids) > len(history_suffix_ids)
+        and inserted_generated_ids[: len(history_suffix_ids)]
+        == history_suffix_ids
+    ):
+        trim_count = len(inserted_generated_ids) - len(history_suffix_ids)
+        snapshot_state = evaluator.trim_h2o_state_tail(
+            snapshot_state, trim_count,
+        )
+        can_store = True
+
+    if can_store:
+        h2o_sessions.set(
+            store_key,
+            H2OChatSessionSnapshot(
+                session_id=store_key,
+                messages=normalized_history_messages,
+                tools=active_tools,
+                history_token_ids=history_ids,
+                runtime_state=evaluator.clone_h2o_state(
+                    snapshot_state, "cpu",
+                ),
+                signature=signature,
+            ),
+        )
+
+
+def _try_restore_from_session(
+    h2o_sessions: LRUSessionStore,
+    evaluator: "OracleKVProjectAPI",
+    enable_session: bool,
+    session_id: str | None,
+    prompt_ids: list[int],
+    signature: tuple[Any, ...],
+    normalized_messages: list[dict[str, Any]],
+    active_tools: list[dict[str, Any]] | None,
+    score_alpha: float,
+    role_alphas: dict[int, float],
+    policy: Any,
+    evict_period: int,
+    collect_period: int,
+    dta_gamma: float,
+) -> tuple[Any, Any]:
+    """Try to restore H2O state from a previous session snapshot.
+
+    Returns (cached_logits, state) — both None if no match found.
+    """
+    if not enable_session:
+        return None, None
+
+    snapshot = (
+        h2o_sessions.get(session_id)
+        if session_id
+        else h2o_sessions.find_by_prefix(prompt_ids, signature)
+    )
+    if snapshot is None:
+        return None, None
+
+    messages_match = (
+        snapshot.signature == signature
+        and snapshot.tools == active_tools
+        and len(normalized_messages) > len(snapshot.messages)
+        and normalized_messages[: len(snapshot.messages)] == snapshot.messages
+        and prompt_ids[: len(snapshot.history_token_ids)]
+        == snapshot.history_token_ids
+    )
+    if not messages_match:
+        return None, None
+
+    appended_ids = prompt_ids[len(snapshot.history_token_ids):]
+    if not appended_ids:
+        return None, None
+
+    state = evaluator.restore_h2o_state(
+        snapshot.runtime_state,
+        alpha=score_alpha,
+        role_alphas=role_alphas,
+    )
+    cached_logits, state = evaluator.continue_h2o_state(
+        appended_ids, policy, state,
+        evict_period=evict_period,
+        collect_period=collect_period,
+        dta_gamma=dta_gamma,
+    )
+    return cached_logits, state
+
+
+def _build_chat_completion_result(
+    req: "ChatCompletionRequest",
+    served_model_name: str,
+    method_key: str,
+    assistant_content: str,
+    response_tool_calls: list[dict[str, Any]] | None,
+    traces: list[Any],
+    prompt_len: int,
+    generated_ids: list[int],
+) -> dict[str, Any]:
+    """Build an OpenAI-compatible chat completion response dict."""
+    choice_message: dict[str, Any] = {
+        "role": "assistant",
+        "content": assistant_content,
+    }
+    if response_tool_calls:
+        choice_message["tool_calls"] = response_tool_calls
+
+    choice: dict[str, Any] = {
+        "index": 0,
+        "message": choice_message,
+        "finish_reason": "tool_calls" if response_tool_calls else "stop",
+        "method": method_key,
+    }
+    if req.save_step_trace:
+        choice["step_trace"] = [
+            trace.model_dump() if hasattr(trace, "model_dump")
+            else trace.__dict__
+            for trace in traces
+        ]
+
+    model_name = req.model or served_model_name
+    return {
+        "id": f"chatcmpl-{uuid.uuid4().hex[:24]}",
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": model_name,
+        "choices": [choice],
+        "usage": {
+            "prompt_tokens": prompt_len,
+            "completion_tokens": len(generated_ids),
+            "total_tokens": prompt_len + len(generated_ids),
+        },
+    }
 
 
 def main() -> None:
@@ -365,217 +536,105 @@ def main() -> None:
         max_new_tokens: int,
     ) -> dict[str, Any]:
         if req.session_id and req.max_input_tokens is not None:
-            raise HTTPException(status_code=400, detail="session_id cannot be combined with max_input_tokens yet")
+            raise HTTPException(
+                status_code=400,
+                detail="session_id cannot be combined with max_input_tokens yet",
+            )
 
-        # Determine which H2O variant is in use.
-        h2o_method_key = "dta_h2o" if "dta_h2o" in req_method_configs or fixed_method == "dta_h2o" else "h2o"
-        method_cfg = req_method_configs.get(h2o_method_key, req_method_configs.get("h2o", {}))
-        dta_gamma = float(method_cfg.get("dta_gamma", 1.0 if h2o_method_key == "h2o" else args.dta_gamma))
-        score_alpha = float(method_cfg.get("session_score_alpha", 0.5))
-        if score_alpha < 0.0:
-            raise HTTPException(status_code=400, detail="session_score_alpha must be >= 0")
-
-        # Role-aware decay alphas (Scheme C).
-        role_alphas: dict[int, float] = {
-            ROLE_SYSTEM: float(method_cfg.get("role_alpha_system", 0.9)),
-            ROLE_USER: float(method_cfg.get("role_alpha_user", 0.3)),
-            ROLE_ASSISTANT: float(method_cfg.get("role_alpha_assistant", 0.3)),
-            ROLE_TOOL: float(method_cfg.get("role_alpha_tool", 0.7)),
-        }
-
-        policy = evaluator._build_policy(h2o_method_key, method_cfg)
-        signature = _build_h2o_session_signature(
-            method_cfg,
+        h2o_method_key, method_cfg, dta_gamma, score_alpha, role_alphas = (
+            _resolve_h2o_method_config(
+                req_method_configs, fixed_method, args.dta_gamma,
+            )
+        )
+        policy = evaluator.build_policy(h2o_method_key, method_cfg)
+        signature = build_h2o_session_signature(
+            h2o_method_key, method_cfg,
             evict_period=args.evict_period,
             collect_period=collect_period,
-            alpha=score_alpha,
+            alpha=score_alpha, role_alphas=role_alphas,
         )
-        prompt_ids = evaluator.model.format_prompt_ids(
-            prompt=None,
-            messages=normalized_messages,
-            max_input_tokens=req.max_input_tokens,
-            add_generation_prompt=True,
-            tools=active_tools,
-            canonical_chat=True,
+
+        prompt_ids, role_ids, turn_ids_list = _prepare_h2o_prompt_data(
+            evaluator, h2o_method_key, normalized_messages,
+            active_tools, req.max_input_tokens,
         )
         prompt_len = len(prompt_ids)
 
-        # Build per-token role ids (and turn ids for DTA-H2O).
-        turn_ids_list: list[int] | None = None
-        if h2o_method_key == "dta_h2o":
-            role_ids, turn_ids_list = build_token_role_and_turn_ids(
-                normalized_messages,
-                evaluator.model.tokenizer,
-                tools=active_tools,
-                add_generation_prompt=True,
-            )
-        else:
-            role_ids = build_token_role_ids(
-                normalized_messages,
-                evaluator.model.tokenizer,
-                tools=active_tools,
-                add_generation_prompt=True,
-            )
-        # Align with possible truncation from max_input_tokens.
-        if len(role_ids) > prompt_len:
-            role_ids = role_ids[len(role_ids) - prompt_len:]
-            if turn_ids_list is not None:
-                turn_ids_list = turn_ids_list[len(turn_ids_list) - prompt_len:]
-        elif len(role_ids) < prompt_len:
-            role_ids = role_ids + [ROLE_ASSISTANT] * (prompt_len - len(role_ids))
-            if turn_ids_list is not None:
-                last_turn = turn_ids_list[-1] if turn_ids_list else 0
-                turn_ids_list = turn_ids_list + [last_turn] * (prompt_len - len(turn_ids_list))
-
         t0 = time.perf_counter()
-        cached_logits = None
-        state = None
-
-        # --- Session lookup: explicit session_id OR automatic prefix match ---
-        snapshot = None
-        if enable_session:
-            if req.session_id:
-                snapshot = h2o_sessions.get(req.session_id)
-            else:
-                snapshot = h2o_sessions.find_by_prefix(prompt_ids, signature)
-
-        if snapshot is not None:
-            messages_match = (
-                snapshot.signature == signature
-                and snapshot.tools == active_tools
-                and len(normalized_messages) > len(snapshot.messages)
-                and normalized_messages[: len(snapshot.messages)] == snapshot.messages
-                and prompt_ids[: len(snapshot.history_token_ids)] == snapshot.history_token_ids
-            )
-            if messages_match:
-                appended_ids = prompt_ids[len(snapshot.history_token_ids):]
-                if appended_ids:
-                    state = evaluator.restore_h2o_state(
-                        snapshot.runtime_state,
-                        alpha=score_alpha,
-                        role_alphas=role_alphas,
-                    )
-                    cached_logits, state = evaluator.continue_h2o_state(
-                        appended_ids,
-                        policy,
-                        state,
-                        evict_period=args.evict_period,
-                        collect_period=collect_period,
-                        dta_gamma=dta_gamma,
-                    )
-
+        cached_logits, state = _try_restore_from_session(
+            h2o_sessions, evaluator, enable_session, req.session_id,
+            prompt_ids, signature, normalized_messages, active_tools,
+            score_alpha, role_alphas, policy,
+            args.evict_period, collect_period, dta_gamma,
+        )
         if cached_logits is None or state is None:
             cached_logits, state = evaluator.initialize_h2o_state(
-                prompt_ids, policy, role_ids=role_ids, turn_ids_list=turn_ids_list)
+                prompt_ids, policy,
+                role_ids=role_ids, turn_ids_list=turn_ids_list,
+            )
 
         generated_ids, traces, _, state = evaluator.generate_from_h2o_state(
-            cached_logits=cached_logits,
-            state=state,
-            policy=policy,
+            cached_logits=cached_logits, state=state, policy=policy,
             max_new_tokens=max_new_tokens,
-            temperature=req.temperature,
-            top_p=req.top_p,
-            stop_on_eos=True,
-            save_step_trace=req.save_step_trace,
+            temperature=req.temperature, top_p=req.top_p,
+            stop_on_eos=True, save_step_trace=req.save_step_trace,
             prompt_len=prompt_len,
             evict_period=args.evict_period,
-            collect_period=collect_period,
-            dta_gamma=dta_gamma,
+            collect_period=collect_period, dta_gamma=dta_gamma,
         )
         elapsed = time.perf_counter() - t0
 
-        output_text = evaluator.model.tokenizer.decode(generated_ids, skip_special_tokens=True)
-        assistant_content, parsed_tool_calls = extract_tool_calls_from_text(output_text)
+        output_text = evaluator.model.tokenizer.decode(
+            generated_ids, skip_special_tokens=True,
+        )
+        assistant_content, parsed_tool_calls = extract_tool_calls_from_text(
+            output_text,
+        )
         response_tool_calls = _build_response_tool_calls(parsed_tool_calls)
 
-        assistant_history_message: dict[str, Any] = {
-            "role": "assistant",
-            "content": assistant_content,
+        assistant_msg: dict[str, Any] = {
+            "role": "assistant", "content": assistant_content,
         }
         if response_tool_calls:
-            assistant_history_message["tool_calls"] = response_tool_calls
-        normalized_history_messages = normalize_chat_messages(
-            normalized_messages + [assistant_history_message]
+            assistant_msg["tool_calls"] = response_tool_calls
+        history_messages = normalize_chat_messages(
+            normalized_messages + [assistant_msg],
         )
 
-        # --- Snapshot save: only when session reuse is enabled ---
         if enable_session:
-            store_key = req.session_id or f"auto_{LRUSessionStore._hash_token_prefix(prompt_ids, LRUSessionStore._PREFIX_HASH_LEN)}_{len(normalized_messages)}"
-
-            history_ids = evaluator.model.format_prompt_ids(
-                prompt=None,
-                messages=normalized_history_messages,
-                max_input_tokens=None,
-                add_generation_prompt=False,
-                tools=active_tools,
-                canonical_chat=True,
+            store_key = req.session_id or (
+                f"auto_"
+                f"{hashlib.sha256(','.join(map(str, prompt_ids)).encode()).hexdigest()[:20]}_"
+                f"{len(normalized_messages)}_{hash_signature(signature)}"
             )
-            eos_token_id = evaluator.model.tokenizer.eos_token_id
-            inserted_generated_ids = generated_ids
-            if inserted_generated_ids and eos_token_id is not None and inserted_generated_ids[-1] == eos_token_id:
-                inserted_generated_ids = inserted_generated_ids[:-1]
-            history_suffix_ids = history_ids[len(prompt_ids):]
+            _save_h2o_session_snapshot(
+                h2o_sessions, evaluator, store_key,
+                history_messages, active_tools, prompt_ids,
+                generated_ids, state, policy, signature,
+                args.evict_period, collect_period, dta_gamma,
+            )
 
-            snapshot_state = state
-            can_store_snapshot = False
-            if len(history_suffix_ids) >= len(inserted_generated_ids) and history_suffix_ids[: len(inserted_generated_ids)] == inserted_generated_ids:
-                closure_ids = history_suffix_ids[len(inserted_generated_ids):]
-                if closure_ids:
-                    _, snapshot_state = evaluator.continue_h2o_state(
-                        closure_ids,
-                        policy,
-                        snapshot_state,
-                        evict_period=args.evict_period,
-                        collect_period=collect_period,
-                        dta_gamma=dta_gamma,
-                    )
-                can_store_snapshot = True
-            elif len(inserted_generated_ids) > len(history_suffix_ids) and inserted_generated_ids[: len(history_suffix_ids)] == history_suffix_ids:
-                trim_count = len(inserted_generated_ids) - len(history_suffix_ids)
-                snapshot_state = evaluator.trim_h2o_state_tail(snapshot_state, trim_count)
-                can_store_snapshot = True
-
-            if can_store_snapshot:
-                h2o_sessions.set(store_key, H2OChatSessionSnapshot(
-                    session_id=store_key,
-                    messages=normalized_history_messages,
-                    tools=active_tools,
-                    history_token_ids=history_ids,
-                    runtime_state=evaluator.clone_h2o_state(snapshot_state, "cpu"),
-                    signature=signature,
-                ))
-
-        choice_message: dict[str, Any] = {
-            "role": "assistant",
-            "content": assistant_content,
-        }
-        if response_tool_calls:
-            choice_message["tool_calls"] = response_tool_calls
-
-        choice: dict[str, Any] = {
-            "index": 0,
-            "message": choice_message,
-            "finish_reason": "tool_calls" if response_tool_calls else "stop",
-            "method": h2o_method_key,
-        }
-        if req.save_step_trace:
-            choice["step_trace"] = [trace.model_dump() if hasattr(trace, "model_dump") else trace.__dict__ for trace in traces]
-
-        model_name = req.model or served_model_name
-        return {
-            "id": f"chatcmpl-{uuid.uuid4().hex[:24]}",
-            "object": "chat.completion",
-            "created": int(time.time()),
-            "model": model_name,
-            "choices": [choice],
-            "usage": {
-                "prompt_tokens": prompt_len,
-                "completion_tokens": len(generated_ids),
-                "total_tokens": prompt_len + len(generated_ids),
-            },
-        }
+        return _build_chat_completion_result(
+            req, served_model_name, h2o_method_key,
+            assistant_content, response_tool_calls, traces,
+            prompt_len, generated_ids,
+        )
 
     app = FastAPI(title="Oracle KV Eval API", version="1.0.0")
+
+    # --- API key authentication ---
+    api_key = args.api_key or os.environ.get("API_KEY")
+    if api_key:
+        _bearer_scheme = HTTPBearer()
+
+        async def _verify_api_key(
+            credentials: HTTPAuthorizationCredentials = Security(_bearer_scheme),
+        ) -> None:
+            if credentials.credentials != api_key:
+                raise HTTPException(status_code=401, detail="Invalid API key")
+
+        app.dependency_overrides[_verify_api_key] = _verify_api_key
+        app.router.dependencies.append(Depends(_verify_api_key))
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -588,19 +647,22 @@ def main() -> None:
         if fixed_method and fixed_method_configs and fixed_method not in req_method_configs:
             req_method_configs = {**req_method_configs, **fixed_method_configs}
         max_new_tokens = req.max_new_tokens if req.max_new_tokens is not None else args.max_new_tokens
-        return evaluator.evaluate(
-            samples=req.samples,
-            methods=methods,
-            method_configs=req_method_configs,
-            max_new_tokens=max_new_tokens,
-            evict_period=args.evict_period,
-            collect_period=collect_period,
-            temperature=req.temperature,
-            top_p=req.top_p,
-            stop_on_eos=req.stop_on_eos,
-            max_input_tokens=req.max_input_tokens,
-            save_step_trace=req.save_step_trace,
-        )
+        try:
+            return evaluator.evaluate(
+                samples=req.samples,
+                methods=methods,
+                method_configs=req_method_configs,
+                max_new_tokens=max_new_tokens,
+                evict_period=args.evict_period,
+                collect_period=collect_period,
+                temperature=req.temperature,
+                top_p=req.top_p,
+                stop_on_eos=req.stop_on_eos,
+                max_input_tokens=req.max_input_tokens,
+                save_step_trace=req.save_step_trace,
+            )
+        except ValueError as exc:
+            raise _as_bad_request(exc) from exc
 
     @app.get("/v1/models")
     def list_models() -> dict[str, Any]:
@@ -632,37 +694,43 @@ def main() -> None:
         normalized_messages = normalize_chat_messages(
             [message.model_dump(exclude_none=True) for message in req.messages]
         )
+        _validate_normalized_messages(normalized_messages)
 
-        if isinstance(req.tool_choice, dict):
-            raise HTTPException(status_code=400, detail="Explicit tool_choice objects are not supported yet")
+        _validate_tool_choice(req.tool_choice)
         active_tools = None if req.tool_choice == "none" else normalize_tool_definitions(req.tools)
 
         if req.tools and (len(method_keys) != 1 or method_keys[0] not in ("h2o", "dta_h2o")):
             raise HTTPException(status_code=400, detail="tools are currently supported only for single-method h2o/dta_h2o chat requests")
 
         if len(method_keys) == 1 and method_keys[0] in ("h2o", "dta_h2o"):
-            return _h2o_chat_response(
-                req, req_method_configs, normalized_messages,
-                active_tools, max_new_tokens,
-            )
+            try:
+                return _h2o_chat_response(
+                    req, req_method_configs, normalized_messages,
+                    active_tools, max_new_tokens,
+                )
+            except ValueError as exc:
+                raise _as_bad_request(exc) from exc
 
         sample = {
             "id": "chat_0",
             "messages": normalized_messages,
         }
-        result = evaluator.evaluate(
-            samples=[sample],
-            methods=methods,
-            method_configs=req_method_configs,
-            max_new_tokens=max_new_tokens,
-            evict_period=args.evict_period,
-            collect_period=collect_period,
-            temperature=req.temperature,
-            top_p=req.top_p,
-            stop_on_eos=True,
-            max_input_tokens=req.max_input_tokens,
-            save_step_trace=req.save_step_trace,
-        )
+        try:
+            result = evaluator.evaluate(
+                samples=[sample],
+                methods=methods,
+                method_configs=req_method_configs,
+                max_new_tokens=max_new_tokens,
+                evict_period=args.evict_period,
+                collect_period=collect_period,
+                temperature=req.temperature,
+                top_p=req.top_p,
+                stop_on_eos=True,
+                max_input_tokens=req.max_input_tokens,
+                save_step_trace=req.save_step_trace,
+            )
+        except ValueError as exc:
+            raise _as_bad_request(exc) from exc
 
         choices: list[dict[str, Any]] = []
         prompt_tokens = 0
@@ -714,19 +782,22 @@ def main() -> None:
             "prompt": req.prompt,
         }
         max_new_tokens = req.max_tokens if req.max_tokens is not None else args.max_new_tokens
-        result = evaluator.evaluate(
-            samples=[sample],
-            methods=methods,
-            method_configs=req_method_configs,
-            max_new_tokens=max_new_tokens,
-            evict_period=args.evict_period,
-            collect_period=collect_period,
-            temperature=req.temperature,
-            top_p=req.top_p,
-            stop_on_eos=True,
-            max_input_tokens=req.max_input_tokens,
-            save_step_trace=req.save_step_trace,
-        )
+        try:
+            result = evaluator.evaluate(
+                samples=[sample],
+                methods=methods,
+                method_configs=req_method_configs,
+                max_new_tokens=max_new_tokens,
+                evict_period=args.evict_period,
+                collect_period=collect_period,
+                temperature=req.temperature,
+                top_p=req.top_p,
+                stop_on_eos=True,
+                max_input_tokens=req.max_input_tokens,
+                save_step_trace=req.save_step_trace,
+            )
+        except ValueError as exc:
+            raise _as_bad_request(exc) from exc
 
         choices: list[dict[str, Any]] = []
         prompt_tokens = 0

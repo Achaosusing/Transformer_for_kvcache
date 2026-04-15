@@ -7,7 +7,7 @@ from .h2o import H2OPolicy
 
 
 class DTAH2OPolicy(H2OPolicy):
-    """Dynamic Temporal-Aware H2O with tiered eviction and system anchor."""
+    """Dynamic Temporal-Aware H2O with tiered eviction and bounded system anchors."""
 
     name = "dta_h2o"
 
@@ -34,7 +34,7 @@ class DTAH2OPolicy(H2OPolicy):
         role_tags: torch.Tensor,
         turn_ids: torch.Tensor,
     ) -> torch.Tensor:
-        """Tiered eviction: system anchor + turn-level budget split."""
+        """Tiered eviction with strict cache-budget enforcement."""
         device = cumulative_scores.device
         if total_tokens <= 0:
             return torch.empty(0, device=device, dtype=torch.long)
@@ -43,7 +43,7 @@ class DTAH2OPolicy(H2OPolicy):
 
         indices = torch.arange(total_tokens, device=device, dtype=torch.long)
 
-        # 1. Build protected mask: sink | recent | system_anchor
+        # 1. Build the always-kept mask: sink | recent.
         sink_end = min(self.sink_size, total_tokens)
         recent_start = max(sink_end, total_tokens - self.local_window_size)
 
@@ -52,25 +52,45 @@ class DTAH2OPolicy(H2OPolicy):
             protected[:sink_end] = True
         if total_tokens > recent_start:
             protected[recent_start:] = True
-        if self.system_anchor and role_tags is not None:
-            protected |= (role_tags == ROLE_SYSTEM)
 
         protected_indices = indices[protected]
-        num_protected = protected_indices.numel()
-
-        # 2. Candidate tokens = not protected
-        candidate_mask = ~protected
-        candidate_indices = indices[candidate_mask]
-        if candidate_indices.numel() == 0:
-            return protected_indices.sort().values
-
-        remaining_budget = max(0, self.cache_budget - num_protected)
+        remaining_budget = max(0, self.cache_budget - protected_indices.numel())
         if remaining_budget == 0:
             return protected_indices.sort().values
-        if candidate_indices.numel() <= remaining_budget:
-            return indices[:total_tokens]
 
-        # 3. Split candidates by current turn vs history
+        # 2. Reserve budget for system anchors before generic HH selection.
+        anchor_indices = torch.empty(0, device=device, dtype=torch.long)
+        if self.system_anchor and role_tags is not None:
+            anchor_mask = (role_tags == ROLE_SYSTEM) & ~protected
+            anchor_indices = indices[anchor_mask]
+
+        selected_anchor_indices = torch.empty(0, device=device, dtype=torch.long)
+        if anchor_indices.numel() > 0:
+            if anchor_indices.numel() <= remaining_budget:
+                selected_anchor_indices = anchor_indices
+                remaining_budget -= anchor_indices.numel()
+            else:
+                anchor_scores = cumulative_scores[anchor_indices]
+                topk_rel = self._topk_with_recent_tiebreak_torch(
+                    anchor_scores,
+                    remaining_budget,
+                )
+                selected_anchor_indices = anchor_indices[topk_rel]
+                return torch.cat([protected_indices, selected_anchor_indices]).sort().values
+
+        # 3. Candidate tokens = not protected and not already reserved as anchors.
+        candidate_mask = ~protected
+        if selected_anchor_indices.numel() > 0:
+            candidate_mask[selected_anchor_indices] = False
+        candidate_indices = indices[candidate_mask]
+        if candidate_indices.numel() == 0:
+            return torch.cat([protected_indices, selected_anchor_indices]).sort().values
+        if candidate_indices.numel() <= remaining_budget:
+            return torch.cat(
+                [protected_indices, selected_anchor_indices, candidate_indices]
+            ).sort().values
+
+        # 4. Split candidates by current turn vs history.
         current_turn = turn_ids.max()
         cand_turn_ids = turn_ids[candidate_indices]
         is_current = cand_turn_ids == current_turn
@@ -78,7 +98,7 @@ class DTAH2OPolicy(H2OPolicy):
         current_cand_indices = candidate_indices[is_current]
         history_cand_indices = candidate_indices[~is_current]
 
-        # 4. Compute tiered budgets with overflow
+        # 5. Compute tiered budgets with overflow.
         current_budget = int(remaining_budget * self.current_turn_ratio)
         history_budget = remaining_budget - current_budget
 
@@ -99,8 +119,10 @@ class DTAH2OPolicy(H2OPolicy):
                 current_cand_indices.numel(),
             )
 
-        # 5. Top-k selection per tier
+        # 6. Top-k selection per tier.
         parts: list[torch.Tensor] = [protected_indices]
+        if selected_anchor_indices.numel() > 0:
+            parts.append(selected_anchor_indices)
 
         if actual_current_k > 0 and current_cand_indices.numel() > 0:
             if actual_current_k >= current_cand_indices.numel():

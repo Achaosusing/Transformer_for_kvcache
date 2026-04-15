@@ -9,6 +9,8 @@ import numpy as np
 import torch
 import yaml
 
+from .chat_format import normalize_chat_messages
+
 
 def set_global_seed(seed: int) -> None:
     random.seed(seed)
@@ -48,27 +50,19 @@ def write_jsonl(path: str | Path, rows: list[dict[str, Any]]) -> None:
 
 
 def normalize_sample(item: dict[str, Any]) -> tuple[str, str | None, list[dict[str, Any]] | None]:
+    # Priority: "messages" > "prompt" > "instruction" > "question" > "input".
+    # If multiple keys are present, the highest-priority key wins silently.
     sample_id = str(item.get("id", "sample"))
     messages = item.get("messages")
     if isinstance(messages, list) and messages:
-        norm: list[dict[str, Any]] = []
-        for m in messages:
-            entry: dict[str, Any] = {
-                "role": str(m.get("role", "user")),
-                "content": str(m.get("content", "")),
-            }
-            if m.get("tool_calls"):
-                entry["tool_calls"] = m["tool_calls"]
-            if m.get("tool_call_id") is not None:
-                entry["tool_call_id"] = str(m["tool_call_id"])
-            if m.get("reasoning_content") is not None:
-                entry["reasoning_content"] = str(m["reasoning_content"])
-            norm.append(entry)
-        return sample_id, None, norm
+        return sample_id, None, normalize_chat_messages(messages)
 
     for key in ("prompt", "instruction", "question", "input"):
         v = item.get(key)
         if isinstance(v, str) and v.strip():
             return sample_id, v, None
 
-    return sample_id, None, None
+    raise ValueError(
+        f"Sample '{sample_id}' has no recognised content field "
+        "(expected 'messages', 'prompt', 'instruction', 'question', or 'input')"
+    )

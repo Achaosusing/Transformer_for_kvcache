@@ -400,7 +400,7 @@ H2ORuntimeState(
 
 1. `sink`
 2. `recent`
-3. 若 `system_anchor=True`，则额外保护 `ROLE_SYSTEM`
+3. 若 `system_anchor=True`，则在固定预算内优先保留 `ROLE_SYSTEM`
 
 剩余候选 token 再按轮次分为：
 
@@ -421,7 +421,7 @@ $$
 
 ### 5.5 `system_anchor`
 
-若 `system_anchor=True`，则角色为 `ROLE_SYSTEM` 的 token 会被加入 protected 集合，即使它们既不在 sink 区间，也不在 recent 区间。
+若 `system_anchor=True`，则角色为 `ROLE_SYSTEM` 的 token 会优先占用 heavy-hitter 预算；若系统 token 数量超过剩余预算，则按分数与最近性选择其中一部分保留，以维持 cache 上界。
 
 这使 DTA-H2O 能对系统提示和工具定义保持更稳定的跨轮保留。
 

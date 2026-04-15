@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import logging
 import threading
 from dataclasses import dataclass
 from typing import Any
@@ -11,6 +12,8 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from .chat_format import format_canonical_chat
 
+logger = logging.getLogger(__name__)
+
 
 class SDPAAttentionCapture:
     """Wrap ``F.scaled_dot_product_attention`` to collect last-query attention
@@ -20,74 +23,136 @@ class SDPAAttentionCapture:
     is a batched vector–matrix multiply and adds negligible overhead.
     """
 
-    _lock = threading.Lock()
+    _patch_lock = threading.Lock()
+    _thread_state = threading.local()
+    _install_count = 0
+    _original_sdpa: Any = _F.scaled_dot_product_attention
 
     def __init__(self, expected_tokens: int, device: torch.device) -> None:
         self._expected_tokens = expected_tokens
         self._acc = torch.zeros(expected_tokens, dtype=torch.float32, device=device)
         self._valid_layers = 0
-        self._original_sdpa: Any = None
 
-    # ---- context manager ---------------------------------------------------
-    def __enter__(self) -> "SDPAAttentionCapture":
-        self._lock.acquire()
-        self._original_sdpa = _F.scaled_dot_product_attention
-        capture = self
+    @classmethod
+    def _get_capture_stack(cls) -> list["SDPAAttentionCapture"]:
+        stack = getattr(cls._thread_state, "capture_stack", None)
+        if stack is None:
+            stack = []
+            cls._thread_state.capture_stack = stack
+        return stack
 
-        def _wrapper(
-            query: torch.Tensor,
-            key: torch.Tensor,
-            value: torch.Tensor,
-            attn_mask: torch.Tensor | None = None,
-            dropout_p: float = 0.0,
-            is_causal: bool = False,
-            scale: float | None = None,
-            **kwargs: Any,
-        ) -> torch.Tensor:
-            # --- lightweight score extraction for the last query row --------
-            d = query.shape[-1]
-            sf = scale if scale is not None else d ** -0.5
-            q = query[:, :, -1:, :]                           # [B, Hq, 1, D]
-            k = key                                           # [B, Hk, S, D]
-            nq, nk = q.shape[1], k.shape[1]
-            if nk == 0:
-                return capture._original_sdpa(
+    @classmethod
+    def _current_capture(cls) -> "SDPAAttentionCapture | None":
+        stack = getattr(cls._thread_state, "capture_stack", None)
+        if not stack:
+            return None
+        return stack[-1]
+
+    @classmethod
+    def _wrapper(
+        cls,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        attn_mask: torch.Tensor | None = None,
+        dropout_p: float = 0.0,
+        is_causal: bool = False,
+        scale: float | None = None,
+        **kwargs: Any,
+    ) -> torch.Tensor:
+        capture = cls._current_capture()
+        if capture is None:
+            return cls._original_sdpa(
+                query,
+                key,
+                value,
+                attn_mask=attn_mask,
+                dropout_p=dropout_p,
+                is_causal=is_causal,
+                scale=scale,
+                **kwargs,
+            )
+
+        # --- lightweight score extraction for the last query row --------
+        d = query.shape[-1]
+        sf = scale if scale is not None else d ** -0.5
+        q = query[:, :, -1:, :]                           # [B, Hq, 1, D]
+        k = key                                           # [B, Hk, S, D]
+        nq, nk = q.shape[1], k.shape[1]
+        if nk == 0:
+            return cls._original_sdpa(
+                query,
+                key,
+                value,
+                attn_mask=attn_mask,
+                dropout_p=dropout_p,
+                is_causal=is_causal,
+                scale=scale,
+                **kwargs,
+            )
+        if nq != nk:                                       # GQA
+            if nq % nk != 0:
+                # Non-integer GQA ratio — fall back to standard SDPA without capture.
+                return cls._original_sdpa(
                     query, key, value,
                     attn_mask=attn_mask, dropout_p=dropout_p,
                     is_causal=is_causal, scale=scale, **kwargs,
                 )
-            if nq != nk:                                       # GQA
-                k = k.repeat_interleave(nq // nk, dim=1)
-            raw = torch.matmul(q, k.transpose(-2, -1)) * sf   # [B, H, 1, S]
-            if attn_mask is not None:
-                if attn_mask.ndim >= 3:
-                    raw = raw + attn_mask[:, :, -1:, : raw.shape[-1]].to(raw.dtype)
-                elif attn_mask.ndim == 2:
-                    raw = raw + attn_mask[-1:, : raw.shape[-1]].to(raw.dtype)
-            vec = torch.softmax(raw.float(), dim=-1)[0, :, 0, :].mean(dim=0)
+            k = k.repeat_interleave(nq // nk, dim=1)
+        raw = torch.matmul(q, k.transpose(-2, -1)) * sf   # [B, H, 1, S]
+        if attn_mask is not None:
+            if attn_mask.ndim >= 3:
+                raw = raw + attn_mask[:, :, -1:, : raw.shape[-1]].to(raw.dtype)
+            elif attn_mask.ndim == 2:
+                raw = raw + attn_mask[-1:, : raw.shape[-1]].to(raw.dtype)
+        vec = torch.softmax(raw.float(), dim=-1)[0, :, 0, :].mean(dim=0)
 
-            et = capture._expected_tokens
-            if vec.numel() == et:
-                capture._acc.add_(vec.to(capture._acc.device))
-            elif vec.numel() < et:
-                capture._acc[-vec.numel() :].add_(vec.to(capture._acc.device))
-            else:
-                capture._acc.add_(vec[-et:].to(capture._acc.device))
-            capture._valid_layers += 1
+        et = capture._expected_tokens
+        if vec.numel() == et:
+            capture._acc.add_(vec.to(capture._acc.device))
+        elif vec.numel() < et:
+            capture._acc[-vec.numel() :].add_(vec.to(capture._acc.device))
+        else:
+            capture._acc.add_(vec[-et:].to(capture._acc.device))
+        capture._valid_layers += 1
 
-            # --- original SDPA (flash / mem-efficient kernel) ---------------
-            return capture._original_sdpa(
-                query, key, value,
-                attn_mask=attn_mask, dropout_p=dropout_p,
-                is_causal=is_causal, scale=scale, **kwargs,
-            )
+        # --- original SDPA (flash / mem-efficient kernel) ---------------
+        return cls._original_sdpa(
+            query,
+            key,
+            value,
+            attn_mask=attn_mask,
+            dropout_p=dropout_p,
+            is_causal=is_causal,
+            scale=scale,
+            **kwargs,
+        )
 
-        _F.scaled_dot_product_attention = _wrapper
+    # ---- context manager ---------------------------------------------------
+    def __enter__(self) -> "SDPAAttentionCapture":
+        cls = self.__class__
+        with cls._patch_lock:
+            if cls._install_count == 0:
+                cls._original_sdpa = _F.scaled_dot_product_attention
+                _F.scaled_dot_product_attention = cls._wrapper
+            cls._install_count += 1
+        cls._get_capture_stack().append(self)
         return self
 
     def __exit__(self, *exc: Any) -> bool:
-        _F.scaled_dot_product_attention = self._original_sdpa
-        self._lock.release()
+        cls = self.__class__
+        stack = cls._get_capture_stack()
+        if stack and stack[-1] is self:
+            stack.pop()
+        else:
+            stack[:] = [item for item in stack if item is not self]
+        if not stack and hasattr(cls._thread_state, "capture_stack"):
+            delattr(cls._thread_state, "capture_stack")
+
+        with cls._patch_lock:
+            cls._install_count = max(0, cls._install_count - 1)
+            if cls._install_count == 0:
+                _F.scaled_dot_product_attention = cls._original_sdpa
         return False
 
     def get_scores(self) -> torch.Tensor:
@@ -235,7 +300,11 @@ class LocalTransformerModel:
             )
         except TypeError:
             return self.tokenizer.apply_chat_template(messages, **template_kwargs)
-        except Exception:
+        except (ValueError, KeyError) as exc:
+            logger.warning(
+                "apply_chat_template failed (%s: %s); falling back to plain concatenation",
+                type(exc).__name__, exc,
+            )
             prefix = "\nassistant:" if add_generation_prompt else ""
             return "\n".join(
                 f"{m.get('role', 'user')}: {m.get('content', '')}" for m in messages
@@ -411,11 +480,10 @@ class LocalTransformerModel:
         if isinstance(value, dict):
             return {key: cls._clone_cache_value(item, device) for key, item in value.items()}
 
-        cloned = copy.deepcopy(value)
-        if hasattr(cloned, "__dict__"):
-            for attr_name, attr_value in vars(cloned).items():
-                setattr(cloned, attr_name, cls._clone_cache_value(attr_value, device))
-        return cloned
+        raise TypeError(
+            f"Unsupported cache value type: {type(value)}. "
+            "Expected tensor, list, tuple, or dict."
+        )
 
     def clone_past_key_values(
         self,
@@ -432,24 +500,29 @@ class LocalTransformerModel:
         keep_tensor = torch.as_tensor(keep_indices, dtype=torch.long, device=self.model.device)
 
         if hasattr(past_key_values, "key_cache") and hasattr(past_key_values, "value_cache"):
-            for layer_idx in range(len(past_key_values.key_cache)):
-                past_key_values.key_cache[layer_idx] = self._prune_cache_tensor(
-                    past_key_values.key_cache[layer_idx],
-                    keep_tensor,
-                )
-                past_key_values.value_cache[layer_idx] = self._prune_cache_tensor(
-                    past_key_values.value_cache[layer_idx],
-                    keep_tensor,
-                )
-            return past_key_values
+            new_cache = copy.copy(past_key_values)
+            new_cache.key_cache = [
+                self._prune_cache_tensor(past_key_values.key_cache[i], keep_tensor)
+                for i in range(len(past_key_values.key_cache))
+            ]
+            new_cache.value_cache = [
+                self._prune_cache_tensor(past_key_values.value_cache[i], keep_tensor)
+                for i in range(len(past_key_values.value_cache))
+            ]
+            return new_cache
 
         if hasattr(past_key_values, "layers"):
+            new_cache = copy.copy(past_key_values)
+            new_layers = []
             for layer in past_key_values.layers:
+                new_layer = copy.copy(layer)
                 if hasattr(layer, "keys"):
-                    layer.keys = self._prune_cache_tensor(layer.keys, keep_tensor)
+                    new_layer.keys = self._prune_cache_tensor(layer.keys, keep_tensor)
                 if hasattr(layer, "values"):
-                    layer.values = self._prune_cache_tensor(layer.values, keep_tensor)
-            return past_key_values
+                    new_layer.values = self._prune_cache_tensor(layer.values, keep_tensor)
+                new_layers.append(new_layer)
+            new_cache.layers = new_layers
+            return new_cache
 
         legacy_cache = past_key_values.to_legacy_cache() if hasattr(past_key_values, "to_legacy_cache") else past_key_values
         pruned_cache = []
@@ -476,7 +549,10 @@ class LocalTransformerModel:
         if top_p < 1.0:
             sorted_probs, sorted_idx = torch.sort(probs, descending=True)
             csum = torch.cumsum(sorted_probs, dim=-1)
-            mask = csum > top_p
+            # Drop token i when cumsum *before* adding token i already exceeds top_p.
+            # Using `csum > top_p` (without shifting) is off-by-one: it drops token i
+            # as soon as the nucleus fills AT i, rather than AFTER i.
+            mask = (csum - sorted_probs) >= top_p
             mask[0] = False
             sorted_probs = sorted_probs.masked_fill(mask, 0.0)
             denom = sorted_probs.sum()
