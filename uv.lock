@@ -14,12 +14,6 @@ resolution-markers = [
     "python_full_version < '3.11'",
 ]
 
-[manifest]
-members = [
-    "opencompass",
-    "oracle-kv-token-eval",
-]
-
 [[package]]
 name = "addict"
 version = "2.4.0"
@@ -2070,11 +2064,6 @@ wheels = [
 ]
 
 [[package]]
-name = "opencompass"
-version = "0.1.0"
-source = { virtual = "opencompass" }
-
-[[package]]
 name = "opentelemetry-api"
 version = "1.40.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2161,72 +2150,79 @@ name = "oracle-kv-token-eval"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "fastapi" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "pyyaml" },
+    { name = "torch" },
+    { name = "transformers" },
+    { name = "uvicorn" },
+]
+
+[package.optional-dependencies]
+analysis = [
     { name = "addict" },
     { name = "deepdiff" },
     { name = "docstring-parser" },
-    { name = "fastapi" },
     { name = "fs" },
     { name = "gymnasium" },
     { name = "langfuse" },
     { name = "litellm" },
     { name = "loguru" },
     { name = "matplotlib" },
-    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "numpy", version = "2.4.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "pandas", version = "3.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "plotly" },
     { name = "psutil" },
     { name = "pydantic-argparse" },
-    { name = "pytest" },
-    { name = "pyyaml" },
     { name = "redis" },
     { name = "rich" },
-    { name = "ruff" },
     { name = "scikit-learn", version = "1.7.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "scikit-learn", version = "1.8.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "seaborn" },
     { name = "tabulate" },
     { name = "tenacity" },
     { name = "toml" },
-    { name = "torch" },
-    { name = "transformers" },
-    { name = "uvicorn" },
     { name = "watchdog" },
+]
+dev = [
+    { name = "pytest" },
+    { name = "ruff" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "addict", specifier = ">=2.4.0" },
-    { name = "deepdiff", specifier = ">=8.4.2" },
-    { name = "docstring-parser", specifier = ">=0.16" },
+    { name = "addict", marker = "extra == 'analysis'", specifier = ">=2.4.0" },
+    { name = "deepdiff", marker = "extra == 'analysis'", specifier = ">=8.4.2" },
+    { name = "docstring-parser", marker = "extra == 'analysis'", specifier = ">=0.16" },
     { name = "fastapi", specifier = ">=0.115.11" },
-    { name = "fs" },
-    { name = "gymnasium", specifier = ">=1.2.2" },
-    { name = "langfuse", specifier = ">=2.60.7" },
-    { name = "litellm", specifier = ">=1.65.0" },
-    { name = "loguru", specifier = ">=0.7.3" },
-    { name = "matplotlib", specifier = ">=3.10.1" },
+    { name = "fs", marker = "extra == 'analysis'" },
+    { name = "gymnasium", marker = "extra == 'analysis'", specifier = ">=1.2.2" },
+    { name = "langfuse", marker = "extra == 'analysis'", specifier = ">=2.60.7" },
+    { name = "litellm", marker = "extra == 'analysis'", specifier = ">=1.65.0" },
+    { name = "loguru", marker = "extra == 'analysis'", specifier = ">=0.7.3" },
+    { name = "matplotlib", marker = "extra == 'analysis'", specifier = ">=3.10.1" },
     { name = "numpy", specifier = ">=1.24.0" },
-    { name = "pandas", specifier = ">=2.2.3" },
-    { name = "plotly", specifier = ">=6.0.0" },
-    { name = "psutil", specifier = ">=7.0.0" },
-    { name = "pydantic-argparse", specifier = ">=0.10.0" },
-    { name = "pytest", specifier = ">=8.3.5" },
+    { name = "pandas", marker = "extra == 'analysis'", specifier = ">=2.2.3" },
+    { name = "plotly", marker = "extra == 'analysis'", specifier = ">=6.0.0" },
+    { name = "psutil", marker = "extra == 'analysis'", specifier = ">=7.0.0" },
+    { name = "pydantic-argparse", marker = "extra == 'analysis'", specifier = ">=0.10.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3.5" },
     { name = "pyyaml", specifier = ">=6.0.2" },
-    { name = "redis", specifier = ">=5.2.1" },
-    { name = "rich" },
-    { name = "ruff", specifier = ">=0.9.1" },
-    { name = "scikit-learn", specifier = ">=1.6.1" },
-    { name = "seaborn", specifier = ">=0.13.2" },
-    { name = "tabulate", specifier = ">=0.9.0" },
-    { name = "tenacity", specifier = ">=9.0.0" },
-    { name = "toml", specifier = ">=0.10.2" },
+    { name = "redis", marker = "extra == 'analysis'", specifier = ">=5.2.1" },
+    { name = "rich", marker = "extra == 'analysis'" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.9.1" },
+    { name = "scikit-learn", marker = "extra == 'analysis'", specifier = ">=1.6.1" },
+    { name = "seaborn", marker = "extra == 'analysis'", specifier = ">=0.13.2" },
+    { name = "tabulate", marker = "extra == 'analysis'", specifier = ">=0.9.0" },
+    { name = "tenacity", marker = "extra == 'analysis'", specifier = ">=9.0.0" },
+    { name = "toml", marker = "extra == 'analysis'", specifier = ">=0.10.2" },
     { name = "torch", specifier = ">=2.2.0" },
     { name = "transformers", specifier = ">=4.45.0" },
     { name = "uvicorn", specifier = ">=0.34.0" },
-    { name = "watchdog", specifier = ">=6.0.0" },
+    { name = "watchdog", marker = "extra == 'analysis'", specifier = ">=6.0.0" },
 ]
+provides-extras = ["analysis", "dev"]
 
 [[package]]
 name = "orderly-set"

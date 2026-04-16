@@ -1,3 +1,41 @@
+Metadata-Version: 2.4
+Name: oracle-kv-token-eval
+Version: 0.1.0
+Summary: Token-level oracle StreamingLLM/H2O simulator for local Transformer models
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: fastapi>=0.115.11
+Requires-Dist: numpy>=1.24.0
+Requires-Dist: PyYAML>=6.0.2
+Requires-Dist: torch>=2.2.0
+Requires-Dist: transformers>=4.45.0
+Requires-Dist: uvicorn>=0.34.0
+Provides-Extra: analysis
+Requires-Dist: addict>=2.4.0; extra == "analysis"
+Requires-Dist: deepdiff>=8.4.2; extra == "analysis"
+Requires-Dist: docstring-parser>=0.16; extra == "analysis"
+Requires-Dist: fs; extra == "analysis"
+Requires-Dist: gymnasium>=1.2.2; extra == "analysis"
+Requires-Dist: langfuse>=2.60.7; extra == "analysis"
+Requires-Dist: litellm>=1.65.0; extra == "analysis"
+Requires-Dist: loguru>=0.7.3; extra == "analysis"
+Requires-Dist: matplotlib>=3.10.1; extra == "analysis"
+Requires-Dist: pandas>=2.2.3; extra == "analysis"
+Requires-Dist: plotly>=6.0.0; extra == "analysis"
+Requires-Dist: psutil>=7.0.0; extra == "analysis"
+Requires-Dist: pydantic-argparse>=0.10.0; extra == "analysis"
+Requires-Dist: redis>=5.2.1; extra == "analysis"
+Requires-Dist: rich; extra == "analysis"
+Requires-Dist: scikit-learn>=1.6.1; extra == "analysis"
+Requires-Dist: seaborn>=0.13.2; extra == "analysis"
+Requires-Dist: tabulate>=0.9.0; extra == "analysis"
+Requires-Dist: tenacity>=9.0.0; extra == "analysis"
+Requires-Dist: toml>=0.10.2; extra == "analysis"
+Requires-Dist: watchdog>=6.0.0; extra == "analysis"
+Provides-Extra: dev
+Requires-Dist: pytest>=8.3.5; extra == "dev"
+Requires-Dist: ruff>=0.9.1; extra == "dev"
+
 # Oracle KV Token Eval
 
 本仓库面向本地 Transformer 模型，提供四种 KV cache 策略的统一评测入口：

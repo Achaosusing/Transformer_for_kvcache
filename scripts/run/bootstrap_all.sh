@@ -12,6 +12,23 @@ if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
   exit 1
 fi
 
+cat <<EOF
+[deprecated] scripts/run/bootstrap_all.sh is kept only as a compatibility helper.
+
+Preferred setup:
+  conda create -n oracle-kv python=3.10 -y
+  conda activate oracle-kv
+  python -m pip install -U pip setuptools wheel
+  python -m pip install -e '.[dev]'
+
+Optional analysis extras:
+  python -m pip install -e '.[dev,analysis]'
+
+Optional uv path:
+  uv sync --extra dev
+  uv sync --extra dev --extra analysis
+EOF
+
 if [[ ! -d "$VENV_DIR" ]]; then
   echo "[setup] creating virtual environment at $VENV_DIR"
   "$PYTHON_BIN" -m venv "$VENV_DIR"
@@ -25,26 +42,17 @@ echo "[setup] ensuring pip is available"
 echo "[setup] upgrading pip/setuptools/wheel"
 "$VENV_DIR/bin/python" -m pip install --upgrade pip setuptools wheel
 
-echo "[setup] installing dependencies from requirements.txt"
-"$VENV_DIR/bin/python" -m pip install -r requirements.txt
-
-echo "[setup] installing root project in editable mode"
-"$VENV_DIR/bin/python" -m pip install -e .
-
-echo "[verify] checking tau2 command"
-"$VENV_DIR/bin/tau2" --help >/dev/null
+echo "[setup] installing project in editable mode with dev extras"
+"$VENV_DIR/bin/python" -m pip install -e '.[dev]'
 
 echo "[verify] checking root package import"
 "$VENV_DIR/bin/python" -c "import src; print('src import ok')"
 
 cat <<EOF
-[done] environment is ready
+[done] compatibility environment is ready
 
 Use it with:
   source "$VENV_DIR/bin/activate"
 
-Quick checks:
-  which python
-  which tau2
-  tau2 --help
+Primary long-term setup remains conda + editable pip.
 EOF
